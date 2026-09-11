@@ -30,29 +30,47 @@ private enum ToolOption: String, CaseIterable {
 
 struct ContentView: View {
     @State private var message = "Hello there Aaron!"
+    @State private var selectedTool: ToolOption?
 
     var body: some View {
         NavigationStack {
-            TextEditor(text: $message)
-                .padding()
-                .navigationTitle("Hello World")
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Menu {
-                            Menu("Tools") {
-                                ForEach(ToolOption.allCases, id: \.self) { tool in
-                                    Button(action: {}) {
-                                        Label(tool.title, systemImage: tool.symbolName)
-                                    }
-                                    .accessibilityLabel(tool.title)
+            Group {
+                switch selectedTool {
+                case .calendar:
+                    CalendarToolView()
+                case .calculator, .barometer, .none:
+                    TextEditor(text: $message)
+                        .padding()
+                }
+            }
+            .navigationTitle(navigationTitle)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Menu("Tools") {
+                            ForEach(ToolOption.allCases, id: \.self) { tool in
+                                Button(action: { selectTool(tool) }) {
+                                    Label(tool.title, systemImage: tool.symbolName)
                                 }
+                                .accessibilityLabel(tool.title)
                             }
-                        } label: {
-                            Label("Menu", systemImage: "line.3.horizontal")
-                                .accessibilityLabel("Open app menu")
                         }
+                    } label: {
+                        Label("Menu", systemImage: "line.3.horizontal")
+                            .accessibilityLabel("Open app menu")
                     }
                 }
+            }
         }
+    }
+
+    private var navigationTitle: String {
+        selectedTool?.title ?? "Hello World"
+    }
+
+    private func selectTool(_ tool: ToolOption) {
+        // Only Calendar is implemented so far; other tools are tracked separately.
+        guard tool == .calendar else { return }
+        selectedTool = tool
     }
 }
