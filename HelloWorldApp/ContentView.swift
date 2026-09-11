@@ -38,7 +38,11 @@ struct ContentView: View {
                 switch selectedTool {
                 case .calendar:
                     CalendarToolView()
-                case .calculator, .barometer, .none:
+                case .calculator:
+                    CalculatorToolView()
+                case .barometer:
+                    BarometerToolView()
+                case .none:
                     TextEditor(text: $message)
                         .padding()
                 }
@@ -69,8 +73,6 @@ struct ContentView: View {
     }
 
     private func selectTool(_ tool: ToolOption) {
-        // Only Calendar is implemented so far; other tools are tracked separately.
-        guard tool == .calendar else { return }
         selectedTool = tool
     }
 }
