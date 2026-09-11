@@ -10,6 +10,8 @@
 		A10000000000000000000001 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* App.swift */; };
 		A10000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* ContentView.swift */; };
 		A10000000000000000000003 /* CalendarToolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* CalendarToolView.swift */; };
+		A10000000000000000000004 /* CalculatorToolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* CalculatorToolView.swift */; };
+		A10000000000000000000005 /* BarometerToolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* BarometerToolView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -17,6 +19,8 @@
 		A10000000000000000000011 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* CalendarToolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarToolView.swift; sourceTree = "<group>"; };
+		A10000000000000000000014 /* CalculatorToolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalculatorToolView.swift; sourceTree = "<group>"; };
+		A10000000000000000000015 /* BarometerToolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarometerToolView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -44,6 +48,8 @@
 				A10000000000000000000011 /* App.swift */,
 				A10000000000000000000012 /* ContentView.swift */,
 				A10000000000000000000013 /* CalendarToolView.swift */,
+				A10000000000000000000014 /* CalculatorToolView.swift */,
+				A10000000000000000000015 /* BarometerToolView.swift */,
 			);
 			path = HelloWorldApp;
 			sourceTree = "<group>";
@@ -123,6 +129,8 @@
 				A10000000000000000000001 /* App.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* CalendarToolView.swift in Sources */,
+				A10000000000000000000004 /* CalculatorToolView.swift in Sources */,
+				A10000000000000000000005 /* BarometerToolView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -143,6 +151,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = HelloWorldApp;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Used to read the current atmospheric pressure from the barometer for the Barometer tool.";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.HelloWorldApp;
@@ -167,6 +176,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = HelloWorldApp;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Used to read the current atmospheric pressure from the barometer for the Barometer tool.";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.HelloWorldApp;
