@@ -110,7 +110,7 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
             span_id="agent",
             parent_id=None,
             span_data=SimpleNamespace(type="agent", name="Assistant"),
-            started_at=_iso_timestamp(1),
+            started_at=_iso_timestamp(5),
             ended_at=None,
             error=None,
         )
@@ -126,6 +126,9 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
         try:
             agent = next(span for span in spans if span.name == "agent: Assistant")
             self.assertEqual(agent.status.status_code.name, "ERROR")
+            self.assertEqual(agent.end_time, agent.start_time)
+            workflow = next(span for span in spans if span.name == "unfinished workflow")
+            self.assertEqual(workflow.end_time, agent.end_time)
             self.assertEqual(len(spans), 2)
             self.assertEqual(
                 {span.name for span in spans},

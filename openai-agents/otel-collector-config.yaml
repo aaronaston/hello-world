@@ -1,5 +1,6 @@
 receivers:
   otlp:
+    # Compose publishes these ports only on host loopback.
     protocols:
       grpc:
         endpoint: 0.0.0.0:4317

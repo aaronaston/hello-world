@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from math import isfinite
 from threading import RLock
+from time import time_ns
 from typing import Any
 
 from agents.tracing import Span, Trace, TracingProcessor
@@ -70,6 +71,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         self._tracer = provider.get_tracer("openai-agents")
         self._traces: dict[str, OtelSpan] = {}
         self._spans: dict[str, dict[str, OtelSpan]] = {}
+        self._span_start_times: dict[str, dict[str, int | None]] = {}
         self._lock = RLock()
 
     def on_trace_start(self, sdk_trace: Trace) -> None:
@@ -100,6 +102,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 parent = trace_span
             context = otel_trace.set_span_in_context(parent, Context())
             span_data = span.span_data
+            start_time = _timestamp_ns(span.started_at)
             attributes: dict[str, Any] = {
                 "openai_agents.trace_id": span.trace_id,
                 "openai_agents.span_id": span.span_id,
@@ -117,14 +120,20 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 span_name,
                 context=context,
                 attributes=attributes,
-                start_time=_timestamp_ns(span.started_at),
+                start_time=start_time,
             )
+            self._span_start_times.setdefault(span.trace_id, {})[span.span_id] = start_time
 
     def on_span_end(self, span: Span[Any]) -> None:
         """End an OTel span without exporting SDK error details."""
         with self._lock:
             trace_spans = self._spans.get(span.trace_id)
             otel_span = trace_spans.pop(span.span_id, None) if trace_spans is not None else None
+            trace_start_times = self._span_start_times.get(span.trace_id)
+            if trace_start_times is not None:
+                trace_start_times.pop(span.span_id, None)
+                if not trace_start_times:
+                    self._span_start_times.pop(span.trace_id, None)
             if trace_spans is not None and not trace_spans:
                 self._spans.pop(span.trace_id, None)
             if otel_span is not None:
@@ -145,6 +154,11 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     def _end_trace(self, trace_id: str, end_time: int | None = None) -> None:
         spans = self._spans.pop(trace_id, {})
+        start_times = self._span_start_times.pop(trace_id, {})
+        end_time = max(
+            end_time if end_time is not None else time_ns(),
+            max((start for start in start_times.values() if start is not None), default=0),
+        )
         for span in reversed(list(spans.values())):
             span.set_status(Status(StatusCode.ERROR, "Agent operation did not complete"))
             span.end(end_time=end_time)
