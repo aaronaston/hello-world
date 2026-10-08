@@ -14,7 +14,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
-from opentelemetry.trace import NonRecordingSpan, Span as OtelSpan, SpanContext
+from opentelemetry.trace import Span as OtelSpan
 from opentelemetry.trace import Status, StatusCode
 
 
@@ -71,7 +71,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         self._tracer = provider.get_tracer("openai-agents")
         self._traces: dict[str, OtelSpan] = {}
         self._spans: dict[str, dict[str, OtelSpan]] = {}
-        self._span_contexts: dict[str, dict[str, SpanContext]] = {}
         self._span_start_times: dict[str, dict[str, int | None]] = {}
         self._lock = RLock()
 
@@ -96,11 +95,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             if trace_span is None:
                 return
 
-            parent_context = self._span_contexts.get(span.trace_id, {}).get(span.parent_id or "")
-            if parent_context is not None:
-                parent = NonRecordingSpan(parent_context)
-            else:
-                # Agent SDK spans without an active parent are rooted in the workflow span.
+            parent = self._spans.get(span.trace_id, {}).get(span.parent_id or "")
+            # Spans without an active parent are rooted in the workflow span.
+            if parent is None:
                 parent = trace_span
             context = otel_trace.set_span_in_context(parent, Context())
             span_data = span.span_data
@@ -125,9 +122,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 start_time=start_time,
             )
             self._spans.setdefault(span.trace_id, {})[span.span_id] = otel_span
-            self._span_contexts.setdefault(span.trace_id, {})[span.span_id] = (
-                otel_span.get_span_context()
-            )
             self._span_start_times.setdefault(span.trace_id, {})[span.span_id] = start_time
 
     def on_span_end(self, span: Span[Any]) -> None:
@@ -160,7 +154,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     def _end_trace(self, trace_id: str, end_time: int | None = None) -> None:
         spans = self._spans.pop(trace_id, {})
-        self._span_contexts.pop(trace_id, None)
         start_times = self._span_start_times.pop(trace_id, {})
         end_time = max(
             end_time if end_time is not None else time_ns(),

@@ -57,16 +57,6 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
             ended_at=_iso_timestamp(3),
             error=None,
         )
-        delayed_child_span = SimpleNamespace(
-            trace_id=sdk_trace.trace_id,
-            span_id="delayed-tool",
-            parent_id="agent",
-            span_data=SimpleNamespace(type="function", name="delayed_tool"),
-            started_at=_iso_timestamp(4),
-            ended_at=_iso_timestamp(4),
-            error=None,
-        )
-
         processor.on_trace_start(sdk_trace)
         processor.on_span_start(agent_span)
         processor.on_span_start(generation_span)
@@ -74,8 +64,6 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
         processor.on_span_end(tool_span)
         processor.on_span_end(generation_span)
         processor.on_span_end(agent_span)
-        processor.on_span_start(delayed_child_span)
-        processor.on_span_end(delayed_child_span)
         processor.on_trace_end(sdk_trace)
         processor.force_flush()
 
@@ -85,11 +73,9 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
             agent = next(span for span in spans if span.name == "agent: Assistant")
             workflow = next(span for span in spans if span.name == "test workflow")
             generation = next(span for span in spans if span.name == "generation")
-            delayed_child = next(span for span in spans if span.name == "function: delayed_tool")
             self.assertEqual(tool.parent.span_id, agent.context.span_id)
             self.assertEqual(agent.parent.span_id, workflow.context.span_id)
             self.assertEqual(generation.parent.span_id, workflow.context.span_id)
-            self.assertEqual(delayed_child.parent.span_id, agent.context.span_id)
             self.assertEqual(tool.start_time, _timestamp_ns(_iso_timestamp(2)))
             self.assertEqual(tool.status.status_code.name, "ERROR")
             self.assertEqual(tool.status.description, "Agent operation failed")
@@ -105,7 +91,6 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
                     "agent: Assistant",
                     "function: get_weather",
                     "generation",
-                    "function: delayed_tool",
                 },
             )
         finally:
