@@ -135,7 +135,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             self._span_trace_ids.pop(span_id, None)
             if span is not None:
                 span.set_status(Status(StatusCode.ERROR, "Agent operation did not complete"))
-                span.end()
+                span.end(end_time=end_time)
 
         trace_span = self._traces.pop(trace_id, None)
         if trace_span is not None:

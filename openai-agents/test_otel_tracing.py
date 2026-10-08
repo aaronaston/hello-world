@@ -117,15 +117,18 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
         processor.on_trace_start(sdk_trace)
         processor.on_span_start(agent_span)
         processor.on_trace_end(sdk_trace)
+        processor.on_span_end(agent_span)
+        processor.on_trace_end(sdk_trace)
         processor.force_flush()
 
         spans = exporter.get_finished_spans()
         try:
             agent = next(span for span in spans if span.name == "agent: Assistant")
             self.assertEqual(agent.status.status_code.name, "ERROR")
-            self.assertFalse(processor._spans)
-            self.assertFalse(processor._span_trace_ids)
-            self.assertFalse(processor._traces)
+            self.assertEqual(
+                {span.name for span in spans},
+                {"unfinished workflow", "agent: Assistant"},
+            )
         finally:
             processor.shutdown()
 
