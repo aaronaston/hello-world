@@ -66,8 +66,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         self._provider = provider
         self._tracer = provider.get_tracer("openai-agents")
         self._traces: dict[str, OtelSpan] = {}
-        self._spans: dict[str, OtelSpan] = {}
-        self._span_trace_ids: dict[str, str] = {}
+        self._spans: dict[tuple[str, str], OtelSpan] = {}
         self._lock = RLock()
 
     def on_trace_start(self, sdk_trace: Trace) -> None:
@@ -87,17 +86,14 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     def on_span_start(self, span: Span[Any]) -> None:
         """Start an OTel span with the corresponding SDK parent and safe attributes."""
         with self._lock:
-            parent_id = span.parent_id or ""
-            parent = self._spans.get(parent_id)
-            if parent is not None and self._span_trace_ids.get(parent_id) != span.trace_id:
-                parent = None
+            trace_span = self._traces.get(span.trace_id)
+            if trace_span is None:
+                return
+
+            parent = self._spans.get((span.trace_id, span.parent_id or ""))
             if parent is None:
-                parent = self._traces.get(span.trace_id)
-            context = (
-                otel_trace.set_span_in_context(parent, Context())
-                if parent is not None
-                else Context()
-            )
+                parent = trace_span
+            context = otel_trace.set_span_in_context(parent, Context())
             span_data = span.span_data
             attributes: dict[str, Any] = {
                 "openai_agents.trace_id": span.trace_id,
@@ -112,19 +108,17 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 attributes["gen_ai.request.model"] = model
 
             span_name = f"{span_data.type}: {name}" if name else span_data.type
-            self._spans[span.span_id] = self._tracer.start_span(
+            self._spans[(span.trace_id, span.span_id)] = self._tracer.start_span(
                 span_name,
                 context=context,
                 attributes=attributes,
                 start_time=_timestamp_ns(span.started_at),
             )
-            self._span_trace_ids[span.span_id] = span.trace_id
 
     def on_span_end(self, span: Span[Any]) -> None:
         """End an OTel span without exporting SDK error details."""
         with self._lock:
-            otel_span = self._spans.pop(span.span_id, None)
-            self._span_trace_ids.pop(span.span_id, None)
+            otel_span = self._spans.pop((span.trace_id, span.span_id), None)
             if otel_span is not None:
                 if span.error is not None:
                     otel_span.set_status(Status(StatusCode.ERROR, "Agent operation failed"))
@@ -142,14 +136,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         self._provider.shutdown()
 
     def _end_trace(self, trace_id: str, end_time: int | None = None) -> None:
-        span_ids = [
-            span_id
-            for span_id, span_trace_id in self._span_trace_ids.items()
-            if span_trace_id == trace_id
-        ]
-        for span_id in reversed(span_ids):
-            span = self._spans.pop(span_id, None)
-            self._span_trace_ids.pop(span_id, None)
+        span_keys = [key for key in self._spans if key[0] == trace_id]
+        for span_key in reversed(span_keys):
+            span = self._spans.pop(span_key, None)
             if span is not None:
                 span.set_status(Status(StatusCode.ERROR, "Agent operation did not complete"))
                 span.end(end_time=end_time)

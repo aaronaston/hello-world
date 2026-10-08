@@ -5,8 +5,7 @@ Docs: https://openai.github.io/openai-agents-python/
 """
 import os
 
-from agents import Agent, Runner, function_tool
-from agents import RunConfig, flush_traces, set_trace_processors
+from agents import Agent, RunConfig, Runner, flush_traces, function_tool, set_trace_processors
 
 from otel_tracing import OpenTelemetryTracingProcessor
 
