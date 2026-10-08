@@ -156,6 +156,7 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
             1_123_456_000,
         )
         self.assertIsNone(_timestamp_ns(None))
+        self.assertIsNone(_timestamp_ns("not an ISO timestamp"))
 
 
 if __name__ == "__main__":
