@@ -1,26 +1,33 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+from math import isfinite
 from threading import RLock
 from typing import Any
 
 from agents.tracing import Span, Trace, TracingProcessor
-from opentelemetry import trace
+from opentelemetry import trace as otel_trace
 from opentelemetry.context import Context
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import Span as OtelSpan
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
-from opentelemetry.trace import Status, StatusCode
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
+from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
+from opentelemetry.trace import Span as OtelSpan
+from opentelemetry.trace import Status, StatusCode
 
 
 def _timestamp_ns(value: str | None) -> int | None:
     if value is None:
         return None
     timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return int(timestamp.timestamp() * 1_000_000_000)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    delta = timestamp - datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return (
+        (delta.days * 86_400 + delta.seconds) * 1_000_000_000
+        + delta.microseconds * 1_000
+    )
 
 
 class OpenTelemetryTracingProcessor(TracingProcessor):
@@ -29,14 +36,19 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         endpoint: str,
         service_name: str,
         sample_ratio: float = 1.0,
+        span_exporter: SpanExporter | None = None,
     ) -> None:
+        if not isfinite(sample_ratio) or not 0.0 <= sample_ratio <= 1.0:
+            raise ValueError("OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 1.0")
+
         provider = TracerProvider(
             resource=Resource.create({"service.name": service_name}),
             sampler=ParentBased(TraceIdRatioBased(sample_ratio)),
         )
         provider.add_span_processor(
             BatchSpanProcessor(
-                OTLPSpanExporter(
+                span_exporter
+                or OTLPSpanExporter(
                     endpoint=endpoint,
                     insecure=endpoint.startswith("http://"),
                 )
@@ -48,24 +60,30 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         self._spans: dict[str, OtelSpan] = {}
         self._lock = RLock()
 
-    def on_trace_start(self, trace: Trace) -> None:
+    def on_trace_start(self, sdk_trace: Trace) -> None:
         with self._lock:
-            self._traces[trace.trace_id] = self._tracer.start_span(
-                trace.name,
-                attributes={"openai_agents.trace_id": trace.trace_id},
-                start_time=_timestamp_ns(trace.started_at),
+            self._traces[sdk_trace.trace_id] = self._tracer.start_span(
+                sdk_trace.name,
+                attributes={"openai_agents.trace_id": sdk_trace.trace_id},
+                start_time=_timestamp_ns(sdk_trace.started_at),
             )
 
-    def on_trace_end(self, trace: Trace) -> None:
+    def on_trace_end(self, sdk_trace: Trace) -> None:
         with self._lock:
-            span = self._traces.pop(trace.trace_id, None)
+            span = self._traces.pop(sdk_trace.trace_id, None)
             if span is not None:
-                span.end(end_time=_timestamp_ns(trace.ended_at))
+                span.end(end_time=_timestamp_ns(sdk_trace.ended_at))
 
     def on_span_start(self, span: Span[Any]) -> None:
         with self._lock:
-            parent = self._spans.get(span.parent_id or "") or self._traces.get(span.trace_id)
-            context = trace.set_span_in_context(parent, Context()) if parent else Context()
+            parent = self._spans.get(span.parent_id or "")
+            if parent is None:
+                parent = self._traces.get(span.trace_id)
+            context = (
+                otel_trace.set_span_in_context(parent, Context())
+                if parent is not None
+                else Context()
+            )
             span_data = span.span_data
             attributes: dict[str, Any] = {
                 "openai_agents.trace_id": span.trace_id,
@@ -92,7 +110,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             otel_span = self._spans.pop(span.span_id, None)
             if otel_span is not None:
                 if span.error is not None:
-                    otel_span.set_status(Status(StatusCode.ERROR))
+                    otel_span.set_status(Status(StatusCode.ERROR, "Agent operation failed"))
                 otel_span.end(end_time=_timestamp_ns(span.ended_at))
 
     def force_flush(self) -> None:
@@ -100,4 +118,3 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     def shutdown(self) -> None:
         self._provider.shutdown()
-

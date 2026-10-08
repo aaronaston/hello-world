@@ -29,7 +29,10 @@ if __name__ == "__main__":
         os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
     )
     service_name = os.getenv("OTEL_SERVICE_NAME", "hello-world-agent")
-    sample_ratio = float(os.getenv("OTEL_TRACE_SAMPLE_RATIO", "1.0"))
+    try:
+        sample_ratio = float(os.getenv("OTEL_TRACE_SAMPLE_RATIO", "1.0"))
+    except ValueError as error:
+        raise ValueError("OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 1.0") from error
     processor = OpenTelemetryTracingProcessor(endpoint, service_name, sample_ratio)
     set_trace_processors([processor])
     try:
