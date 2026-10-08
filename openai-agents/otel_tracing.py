@@ -18,6 +18,7 @@ from opentelemetry.trace import Status, StatusCode
 
 
 def _timestamp_ns(value: str | None) -> int | None:
+    """Convert SDK timestamps with integer arithmetic to preserve microsecond precision."""
     if value is None:
         return None
     timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -58,6 +59,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         self._tracer = provider.get_tracer("openai-agents")
         self._traces: dict[str, OtelSpan] = {}
         self._spans: dict[str, OtelSpan] = {}
+        self._span_trace_ids: dict[str, str] = {}
         self._lock = RLock()
 
     def on_trace_start(self, sdk_trace: Trace) -> None:
@@ -70,9 +72,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     def on_trace_end(self, sdk_trace: Trace) -> None:
         with self._lock:
-            span = self._traces.pop(sdk_trace.trace_id, None)
-            if span is not None:
-                span.end(end_time=_timestamp_ns(sdk_trace.ended_at))
+            self._end_trace(sdk_trace.trace_id, _timestamp_ns(sdk_trace.ended_at))
 
     def on_span_start(self, span: Span[Any]) -> None:
         with self._lock:
@@ -104,10 +104,12 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 attributes=attributes,
                 start_time=_timestamp_ns(span.started_at),
             )
+            self._span_trace_ids[span.span_id] = span.trace_id
 
     def on_span_end(self, span: Span[Any]) -> None:
         with self._lock:
             otel_span = self._spans.pop(span.span_id, None)
+            self._span_trace_ids.pop(span.span_id, None)
             if otel_span is not None:
                 if span.error is not None:
                     otel_span.set_status(Status(StatusCode.ERROR, "Agent operation failed"))
@@ -117,4 +119,24 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         self._provider.force_flush()
 
     def shutdown(self) -> None:
+        with self._lock:
+            for trace_id in list(self._traces):
+                self._end_trace(trace_id)
         self._provider.shutdown()
+
+    def _end_trace(self, trace_id: str, end_time: int | None = None) -> None:
+        span_ids = [
+            span_id
+            for span_id, span_trace_id in self._span_trace_ids.items()
+            if span_trace_id == trace_id
+        ]
+        for span_id in reversed(span_ids):
+            span = self._spans.pop(span_id, None)
+            self._span_trace_ids.pop(span_id, None)
+            if span is not None:
+                span.set_status(Status(StatusCode.ERROR, "Agent operation did not complete"))
+                span.end()
+
+        trace_span = self._traces.pop(trace_id, None)
+        if trace_span is not None:
+            trace_span.end(end_time=end_time)
