@@ -32,6 +32,13 @@ def _timestamp_ns(value: str | None) -> int | None:
 
 
 class OpenTelemetryTracingProcessor(TracingProcessor):
+    """Export Agents SDK spans through OTLP gRPC without prompt or tool payloads.
+
+    `endpoint` must be a gRPC address. `sample_ratio` sets parent-based head
+    sampling between 0.0 and 1.0. Plaintext transport is enabled for `http://`
+    endpoints; use `https://` for TLS.
+    """
+
     def __init__(
         self,
         endpoint: str,
@@ -39,6 +46,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         sample_ratio: float = 1.0,
         span_exporter: SpanExporter | None = None,
     ) -> None:
+        """Create an OTLP exporter with the selected resource and sampling settings."""
         if not isfinite(sample_ratio) or not 0.0 <= sample_ratio <= 1.0:
             raise ValueError("OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 1.0")
 
@@ -63,6 +71,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         self._lock = RLock()
 
     def on_trace_start(self, sdk_trace: Trace) -> None:
+        """Start the OTel workflow span."""
         with self._lock:
             self._traces[sdk_trace.trace_id] = self._tracer.start_span(
                 sdk_trace.name,
@@ -71,12 +80,17 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             )
 
     def on_trace_end(self, sdk_trace: Trace) -> None:
+        """End the OTel workflow span and any SDK spans that remained open."""
         with self._lock:
             self._end_trace(sdk_trace.trace_id, _timestamp_ns(sdk_trace.ended_at))
 
     def on_span_start(self, span: Span[Any]) -> None:
+        """Start an OTel span with the corresponding SDK parent and safe attributes."""
         with self._lock:
-            parent = self._spans.get(span.parent_id or "")
+            parent_id = span.parent_id or ""
+            parent = self._spans.get(parent_id)
+            if parent is not None and self._span_trace_ids.get(parent_id) != span.trace_id:
+                parent = None
             if parent is None:
                 parent = self._traces.get(span.trace_id)
             context = (
@@ -107,6 +121,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             self._span_trace_ids[span.span_id] = span.trace_id
 
     def on_span_end(self, span: Span[Any]) -> None:
+        """End an OTel span without exporting SDK error details."""
         with self._lock:
             otel_span = self._spans.pop(span.span_id, None)
             self._span_trace_ids.pop(span.span_id, None)
@@ -116,9 +131,11 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 otel_span.end(end_time=_timestamp_ns(span.ended_at))
 
     def force_flush(self) -> None:
+        """Flush spans buffered by the OTel provider."""
         self._provider.force_flush()
 
     def shutdown(self) -> None:
+        """Close incomplete spans and shut down the OTel provider."""
         with self._lock:
             for trace_id in list(self._traces):
                 self._end_trace(trace_id)

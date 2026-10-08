@@ -17,6 +17,7 @@ python hello_agent.py
 The Agents SDK traces runs, model calls, and tool calls to a local OpenTelemetry
 Collector, which forwards them to Jaeger. Open Jaeger at
 <http://localhost:16686>; stop the services with `docker compose down`.
+The published Collector and Jaeger ports are bound to localhost.
 
 Set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (or `OTEL_EXPORTER_OTLP_ENDPOINT`) to
 change the collector endpoint, and `OTEL_SERVICE_NAME` to change the service
