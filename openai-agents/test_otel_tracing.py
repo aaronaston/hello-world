@@ -141,6 +141,38 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
         finally:
             processor.shutdown()
 
+    def test_shutdown_closes_unfinished_trace_and_spans(self) -> None:
+        exporter = InMemorySpanExporter()
+        processor = OpenTelemetryTracingProcessor(
+            "http://127.0.0.1:9",
+            "test-agent",
+            span_exporter=exporter,
+        )
+        sdk_trace = SimpleNamespace(
+            trace_id="trace_0123456789abcdef0123456789abcdef",
+            name="shutdown workflow",
+            started_at=_iso_timestamp(1),
+            ended_at=None,
+        )
+        agent_span = SimpleNamespace(
+            trace_id=sdk_trace.trace_id,
+            span_id="agent",
+            parent_id=None,
+            span_data=SimpleNamespace(type="agent", name="Assistant"),
+            started_at=_iso_timestamp(1),
+            ended_at=None,
+            error=None,
+        )
+        processor.on_trace_start(sdk_trace)
+        processor.on_span_start(agent_span)
+        processor.shutdown()
+
+        spans = exporter.get_finished_spans()
+        agent = next(span for span in spans if span.name == "agent: Assistant")
+        workflow = next(span for span in spans if span.name == "shutdown workflow")
+        self.assertEqual(agent.status.status_code.name, "ERROR")
+        self.assertEqual(agent.end_time, workflow.end_time)
+
     def test_rejects_invalid_sampling_ratio(self) -> None:
         for ratio in (-0.1, 1.1, float("nan")):
             with self.subTest(ratio=ratio), self.assertRaisesRegex(

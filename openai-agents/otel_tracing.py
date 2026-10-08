@@ -63,7 +63,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 span_exporter
                 or OTLPSpanExporter(
                     endpoint=endpoint,
-                    insecure=endpoint.startswith("http://"),
+                    insecure=endpoint.lower().startswith("http://"),
                 )
             )
         )
