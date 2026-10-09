@@ -71,19 +71,20 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             raise ValueError("endpoint must be an http:// or https:// URL")
         sample_ratio = _validate_sample_ratio(sample_ratio)
 
-        provider = TracerProvider(
-            resource=Resource.create({"service.name": service_name}),
-            sampler=ParentBased(TraceIdRatioBased(sample_ratio)),
+        exporter = span_exporter or OTLPSpanExporter(
+            endpoint=endpoint,
+            insecure=endpoint.lower().startswith("http://"),
         )
-        provider.add_span_processor(
-            BatchSpanProcessor(
-                span_exporter
-                or OTLPSpanExporter(
-                    endpoint=endpoint,
-                    insecure=endpoint.lower().startswith("http://"),
-                )
+        span_processor = BatchSpanProcessor(exporter)
+        try:
+            provider = TracerProvider(
+                resource=Resource.create({"service.name": service_name}),
+                sampler=ParentBased(TraceIdRatioBased(sample_ratio)),
             )
-        )
+            provider.add_span_processor(span_processor)
+        except Exception:
+            span_processor.shutdown()
+            raise
         self._provider = provider
         self._tracer = provider.get_tracer("openai-agents")
         self._traces: dict[str, OtelSpan] = {}
@@ -156,7 +157,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                     otel_span.set_status(Status(StatusCode.ERROR, "Agent operation failed"))
                 otel_span.end(end_time=_timestamp_ns(span.ended_at))
 
-    def force_flush(self, timeout_millis: int = 30_000) -> None:
+    def force_flush(self, timeout_millis: int = 5_000) -> None:
         """Flush spans buffered by the OTel provider."""
         self._provider.force_flush(timeout_millis=timeout_millis)
 

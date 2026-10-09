@@ -1,9 +1,14 @@
 from datetime import datetime, timezone
+import os
+from pathlib import Path
 from types import SimpleNamespace
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+from hello_agent import get_otlp_endpoint, load_environment
 from otel_tracing import OpenTelemetryTracingProcessor, _timestamp_ns, parse_sample_ratio
 
 
@@ -12,6 +17,24 @@ def _iso_timestamp(seconds: int) -> str:
 
 
 class OpenTelemetryTracingProcessorTests(unittest.TestCase):
+    def test_loads_values_from_dotenv_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            dotenv_path = Path(directory) / ".env"
+            dotenv_path.write_text("HELLO_WORLD_DOTENV_TEST=loaded\n")
+            with patch.dict(os.environ, {}, clear=True):
+                load_environment(str(dotenv_path))
+                self.assertEqual(os.environ["HELLO_WORLD_DOTENV_TEST"], "loaded")
+
+    def test_trace_endpoint_overrides_general_endpoint(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "http://general:4317",
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "https://traces:4317",
+            },
+        ):
+            self.assertEqual(get_otlp_endpoint(), "https://traces:4317")
+
     def test_exports_nested_spans_without_payload_attributes(self) -> None:
         exporter = InMemorySpanExporter()
         processor = OpenTelemetryTracingProcessor(

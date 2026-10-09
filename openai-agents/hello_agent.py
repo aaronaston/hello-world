@@ -7,8 +7,13 @@ import os
 
 from dotenv import load_dotenv
 
+
+def load_environment(dotenv_path: str | None = None) -> None:
+    load_dotenv(dotenv_path=dotenv_path)
+
+
 # Load credentials before importing the SDK, which may read environment configuration.
-load_dotenv()
+load_environment()
 
 from agents import (  # noqa: E402
     Agent,
@@ -20,6 +25,13 @@ from agents import (  # noqa: E402
 )
 
 from otel_tracing import OpenTelemetryTracingProcessor, parse_sample_ratio  # noqa: E402
+
+
+def get_otlp_endpoint() -> str:
+    return os.getenv(
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
+    )
 
 
 @function_tool
@@ -35,10 +47,7 @@ agent = Agent(
 )
 
 if __name__ == "__main__":
-    endpoint = os.getenv(
-        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-        os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
-    )
+    endpoint = get_otlp_endpoint()
     service_name = os.getenv("OTEL_SERVICE_NAME", "hello-world-agent")
     sample_ratio = parse_sample_ratio(os.getenv("OTEL_TRACE_SAMPLE_RATIO", "1.0"))
     processor = OpenTelemetryTracingProcessor(endpoint, service_name, sample_ratio)
