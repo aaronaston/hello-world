@@ -253,7 +253,7 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
     def test_endpoint_requires_http_or_https_scheme(self) -> None:
         for endpoint in ("localhost:4317", "ftp://host"):
             with self.subTest(endpoint=endpoint), self.assertRaisesRegex(
-                ValueError, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+                ValueError, "endpoint must be an http:// or https:// URL"
             ):
                 OpenTelemetryTracingProcessor(
                     endpoint,

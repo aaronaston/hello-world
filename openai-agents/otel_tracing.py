@@ -68,10 +68,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     ) -> None:
         """Create an OTLP exporter with the selected resource and sampling settings."""
         if not endpoint.lower().startswith(("http://", "https://")):
-            raise ValueError(
-                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT "
-                "must be an http:// or https:// URL"
-            )
+            raise ValueError("endpoint must be an http:// or https:// URL")
         sample_ratio = _validate_sample_ratio(sample_ratio)
 
         provider = TracerProvider(
@@ -90,8 +87,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         self._provider = provider
         self._tracer = provider.get_tracer("openai-agents")
         self._traces: dict[str, OtelSpan] = {}
-        self._spans: dict[str, dict[str, OtelSpan]] = {}
-        self._span_start_times: dict[str, dict[str, int | None]] = {}
+        self._spans: dict[str, dict[str, tuple[OtelSpan, int | None]]] = {}
         self._lock = RLock()
 
     def on_trace_start(self, sdk_trace: Trace) -> None:
@@ -115,10 +111,12 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             if trace_span is None:
                 return
 
-            parent = self._spans.get(span.trace_id, {}).get(span.parent_id or "")
+            parent_entry = self._spans.get(span.trace_id, {}).get(span.parent_id or "")
             # Spans without an active parent are rooted in the workflow span.
-            if parent is None:
+            if parent_entry is None:
                 parent = trace_span
+            else:
+                parent = parent_entry[0]
             context = otel_trace.set_span_in_context(parent, Context())
             span_data = span.span_data
             start_time = _timestamp_ns(span.started_at)
@@ -141,22 +139,17 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 attributes=attributes,
                 start_time=start_time,
             )
-            self._spans.setdefault(span.trace_id, {})[span.span_id] = otel_span
-            self._span_start_times.setdefault(span.trace_id, {})[span.span_id] = start_time
+            self._spans.setdefault(span.trace_id, {})[span.span_id] = (otel_span, start_time)
 
     def on_span_end(self, span: Span[Any]) -> None:
         """End an OTel span without exporting SDK error details."""
         with self._lock:
             trace_spans = self._spans.get(span.trace_id)
-            otel_span = trace_spans.pop(span.span_id, None) if trace_spans is not None else None
-            trace_start_times = self._span_start_times.get(span.trace_id)
-            if trace_start_times is not None:
-                trace_start_times.pop(span.span_id, None)
-                if not trace_start_times:
-                    self._span_start_times.pop(span.trace_id, None)
+            span_entry = trace_spans.pop(span.span_id, None) if trace_spans is not None else None
             if trace_spans is not None and not trace_spans:
                 self._spans.pop(span.trace_id, None)
-            if otel_span is not None:
+            if span_entry is not None:
+                otel_span, _ = span_entry
                 if span.error is not None:
                     otel_span.set_status(Status(StatusCode.ERROR, "Agent operation failed"))
                 otel_span.end(end_time=_timestamp_ns(span.ended_at))
@@ -174,13 +167,15 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     def _end_trace(self, trace_id: str, end_time: int | None = None) -> None:
         spans = self._spans.pop(trace_id, {})
-        start_times = self._span_start_times.pop(trace_id, {})
         end_time = max(
             end_time if end_time is not None else time_ns(),
-            max((start for start in start_times.values() if start is not None), default=0),
+            max(
+                (start for _, start in spans.values() if start is not None),
+                default=0,
+            ),
         )
         # Agent SDK nesting starts parents before children, so reverse insertion ends children first.
-        for span in reversed(list(spans.values())):
+        for span, _ in reversed(list(spans.values())):
             span.set_status(Status(StatusCode.ERROR, "Agent operation did not complete"))
             span.end(end_time=end_time)
 
