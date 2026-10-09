@@ -58,7 +58,7 @@ def parse_span_data_max_length(value: str) -> int:
 
 
 def parse_include_sensitive_data(value: str) -> bool:
-    normalized = value.lower()
+    normalized = value.strip().lower()
     if normalized in {"true", "1"}:
         return True
     if normalized in {"false", "0"}:
@@ -141,15 +141,14 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
             return "[nested value omitted]"
         if isinstance(value, dict):
             return {
-                key[:string_limit]
-                if isinstance(key, str)
-                else (
-                    str(key)[:string_limit]
-                    if key is None or isinstance(key, (bool, int, float))
-                    else f"<{type(key).__name__}>"[:string_limit]
-                ):
+                (
+                    key
+                    if isinstance(key, str)
+                    else json.dumps(key, ensure_ascii=False)
+                )[:string_limit]:
                 preview_value(item, string_limit, item_limit, depth + 1)
                 for key, item in islice(value.items(), item_limit)
+                if isinstance(key, (str, bool, int, float)) or key is None
             }
         return [
             preview_value(item, string_limit, item_limit, depth + 1)

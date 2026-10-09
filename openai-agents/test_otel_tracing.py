@@ -94,11 +94,14 @@ class AgentExampleTests(unittest.TestCase):
             warn_if_remote_sensitive_endpoint("http://127.0.0.1:4317", True)
             warn_if_remote_sensitive_endpoint("https://collector.example:4317", False)
             self.assertEqual(caught, [])
+
+    def test_sensitive_data_defaults_and_overrides(self) -> None:
         self.assertTrue(get_include_sensitive_data("http://localhost:4317", None))
         self.assertFalse(get_include_sensitive_data("https://collector.example:4317", None))
         self.assertTrue(get_include_sensitive_data("https://collector.example:4317", "true"))
         self.assertFalse(get_include_sensitive_data("http://localhost:4317", "false"))
         self.assertFalse(get_include_sensitive_data("http://localhost:4317", "0"))
+        self.assertTrue(get_include_sensitive_data("http://localhost:4317", " true "))
 
     def test_exports_nested_spans_with_payload_attributes(self) -> None:
         exporter = InMemorySpanExporter()
@@ -407,7 +410,7 @@ class AgentExampleTests(unittest.TestCase):
             "<object>",
         )
 
-    def test_preview_does_not_stringify_arbitrary_keys(self) -> None:
+    def test_preview_skips_unsupported_keys_without_stringifying_them(self) -> None:
         class ExplodingKey:
             def __str__(self) -> str:
                 raise AssertionError("preview must not stringify arbitrary keys")
@@ -417,7 +420,7 @@ class AgentExampleTests(unittest.TestCase):
             128,
         )
 
-        self.assertIn("<ExplodingKey>", json.loads(truncated)["preview"])
+        self.assertNotIn("<ExplodingKey>", json.loads(truncated)["preview"])
 
     def test_model_dump_runs_once_when_payload_is_truncated(self) -> None:
         dump_count = 0
