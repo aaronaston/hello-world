@@ -182,7 +182,7 @@ class AgentExampleTests(unittest.TestCase):
             trace_id=sdk_trace.trace_id,
             span_id="large-output",
             parent_id=None,
-            span_data=_span_data("generation", output="sensitive " * 100),
+            span_data=_span_data("generation", output="\x00" * 100),
             started_at=_iso_timestamp(1),
             ended_at=_iso_timestamp(2),
             error=None,

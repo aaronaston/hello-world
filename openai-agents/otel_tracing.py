@@ -51,24 +51,16 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
     if len(serialized) <= max_length:
         return serialized
 
-    def encode_preview(length: int) -> str:
-        return json.dumps(
-            {
-                "truncated": True,
-                "original_length": len(serialized),
-                "preview": serialized[:length],
-            },
-            ensure_ascii=False,
-        )
-
-    low, high = 0, len(serialized)
-    while low < high:
-        middle = (low + high + 1) // 2
-        if len(encode_preview(middle)) <= max_length:
-            low = middle
-        else:
-            high = middle - 1
-    return encode_preview(low)
+    envelope = {
+        "truncated": True,
+        "original_length": len(serialized),
+        "preview": "",
+    }
+    envelope_length = len(json.dumps(envelope, ensure_ascii=False))
+    # JSON escaping expands any character by at most six characters.
+    preview_length = max(0, (max_length - envelope_length) // 6)
+    envelope["preview"] = serialized[:preview_length]
+    return json.dumps(envelope, ensure_ascii=False)
 
 
 def _timestamp_ns(value: str | None) -> int | None:
@@ -187,22 +179,26 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             self._spans.setdefault(span.trace_id, {})[span.span_id] = (otel_span, start_time)
 
     def on_span_end(self, span: Span[Any]) -> None:
-        """End an OTel span without exporting SDK error details."""
+        """Export detailed SDK payload data, then end the OTel span."""
         with self._lock:
             trace_spans = self._spans.get(span.trace_id)
             span_entry = trace_spans.pop(span.span_id, None) if trace_spans is not None else None
             if trace_spans is not None and not trace_spans:
                 self._spans.pop(span.trace_id, None)
-            if span_entry is not None:
-                otel_span, _ = span_entry
-                span_data = span.span_data.export()
-                otel_span.set_attribute(
-                    "openai_agents.span_data",
-                    _serialize_span_data(span_data, self._span_data_max_length),
-                )
-                if span.error is not None:
-                    otel_span.set_status(Status(StatusCode.ERROR, "Agent operation failed"))
-                otel_span.end(end_time=_timestamp_ns(span.ended_at))
+        if span_entry is None:
+            return
+
+        otel_span, _ = span_entry
+        try:
+            span_data = span.span_data.export()
+            otel_span.set_attribute(
+                "openai_agents.span_data",
+                _serialize_span_data(span_data, self._span_data_max_length),
+            )
+            if span.error is not None:
+                otel_span.set_status(Status(StatusCode.ERROR, "Agent operation failed"))
+        finally:
+            otel_span.end(end_time=_timestamp_ns(span.ended_at))
 
     def force_flush(self, timeout_millis: int = 5_000) -> None:
         """Flush spans buffered by the OTel provider."""
