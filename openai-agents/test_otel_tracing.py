@@ -97,6 +97,8 @@ class AgentExampleTests(unittest.TestCase):
         self.assertTrue(get_include_sensitive_data("http://localhost:4317", None))
         self.assertFalse(get_include_sensitive_data("https://collector.example:4317", None))
         self.assertTrue(get_include_sensitive_data("https://collector.example:4317", "true"))
+        self.assertFalse(get_include_sensitive_data("http://localhost:4317", "false"))
+        self.assertFalse(get_include_sensitive_data("http://localhost:4317", "0"))
 
     def test_exports_nested_spans_with_payload_attributes(self) -> None:
         exporter = InMemorySpanExporter()
@@ -380,6 +382,18 @@ class AgentExampleTests(unittest.TestCase):
             preview["nested"]["opaque_path"]["value"],
             "<object>",
         )
+
+    def test_preview_does_not_stringify_arbitrary_keys(self) -> None:
+        class ExplodingKey:
+            def __str__(self) -> str:
+                raise AssertionError("preview must not stringify arbitrary keys")
+
+        truncated = _serialize_span_data(
+            {ExplodingKey(): "opaque key value", "large": "x" * 1_000},
+            128,
+        )
+
+        self.assertIn("<ExplodingKey>", json.loads(truncated)["preview"])
 
     def test_model_dump_runs_once_when_payload_is_truncated(self) -> None:
         dump_count = 0

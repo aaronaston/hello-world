@@ -93,7 +93,11 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
             return dumped
         return f"<{type(value).__name__}>"
 
-    encoder = json.JSONEncoder(default=unsupported_value, ensure_ascii=False)
+    encoder = json.JSONEncoder(
+        default=unsupported_value,
+        ensure_ascii=False,
+        skipkeys=True,
+    )
     chunks: list[str] = []
     size = 0
     for chunk in encoder.iterencode(span_data):
@@ -128,7 +132,13 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
             return "[nested value omitted]"
         if isinstance(value, dict):
             return {
-                key[:string_limit] if isinstance(key, str) else str(key)[:string_limit]:
+                key[:string_limit]
+                if isinstance(key, str)
+                else (
+                    str(key)[:string_limit]
+                    if key is None or isinstance(key, (bool, int, float))
+                    else f"<{type(key).__name__}>"[:string_limit]
+                ):
                 preview_value(item, string_limit, item_limit, depth + 1)
                 for key, item in islice(value.items(), item_limit)
             }
@@ -144,7 +154,12 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
             max_length // divisor,
             item_limit,
         )
-        truncated = json.dumps(envelope, default=unsupported_value, ensure_ascii=False)
+        truncated = json.dumps(
+            envelope,
+            default=unsupported_value,
+            ensure_ascii=False,
+            skipkeys=True,
+        )
         if len(truncated) <= max_length:
             return truncated
     envelope["preview"] = {}
