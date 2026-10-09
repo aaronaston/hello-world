@@ -24,10 +24,9 @@ _SAMPLE_RATIO_ERROR = "OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 
 _SPAN_DATA_LENGTH_ERROR = "OTEL_SPAN_DATA_MAX_LENGTH must be an integer of at least 128"
 _SENSITIVE_DATA_ERROR = "OTEL_TRACE_INCLUDE_SENSITIVE_DATA must be true or false"
 _MIN_SPAN_DATA_LENGTH = 128
-# The progressively smaller limits keep previews readable while bounding their size.
+# Progressively smaller limits keep previews useful as the attribute budget shrinks.
 _SPAN_PREVIEW_DEPTH = 3
-_SPAN_PREVIEW_ITEMS = 8
-_SPAN_PREVIEW_SIZE_DIVISORS = (8, 16, 32)
+_SPAN_PREVIEW_RETRIES = ((8, 8), (16, 4), (32, 2), (64, 1))
 _logger = logging.getLogger(__name__)
 
 
@@ -87,7 +86,12 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
     else:
         return "".join(chunks)
 
-    def preview_value(value: Any, string_limit: int, depth: int = 0) -> Any:
+    def preview_value(
+        value: Any,
+        string_limit: int,
+        item_limit: int,
+        depth: int = 0,
+    ) -> Any:
         if isinstance(value, str):
             return value[:string_limit]
         if value is None or isinstance(value, (bool, int, float)):
@@ -99,22 +103,22 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
         if isinstance(value, dict):
             return {
                 key[:string_limit] if isinstance(key, str) else str(key)[:string_limit]:
-                preview_value(item, string_limit, depth + 1)
-                for key, item in islice(value.items(), _SPAN_PREVIEW_ITEMS)
+                preview_value(item, string_limit, item_limit, depth + 1)
+                for key, item in islice(value.items(), item_limit)
             }
         if isinstance(value, (list, tuple)):
             return [
-                preview_value(item, string_limit, depth + 1)
-                for item in islice(value, _SPAN_PREVIEW_ITEMS)
+                preview_value(item, string_limit, item_limit, depth + 1)
+                for item in islice(value, item_limit)
             ]
-        return [
-            preview_value(item, string_limit, depth + 1)
-            for item in islice(value, _SPAN_PREVIEW_ITEMS)
-        ]
 
     envelope = {"truncated": True, "preview": {}}
-    for divisor in _SPAN_PREVIEW_SIZE_DIVISORS:
-        envelope["preview"] = preview_value(span_data, max_length // divisor)
+    for divisor, item_limit in _SPAN_PREVIEW_RETRIES:
+        envelope["preview"] = preview_value(
+            span_data,
+            max_length // divisor,
+            item_limit,
+        )
         truncated = json.dumps(envelope, default=unsupported_value, ensure_ascii=False)
         if len(truncated) <= max_length:
             return truncated
