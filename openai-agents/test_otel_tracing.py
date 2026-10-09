@@ -11,7 +11,12 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from agents.tracing.traces import TraceImpl
 from hello_agent import get_otlp_endpoint, load_environment
-from otel_tracing import OpenTelemetryTracingProcessor, _timestamp_ns, parse_sample_ratio
+from otel_tracing import (
+    OpenTelemetryTracingProcessor,
+    _timestamp_ns,
+    parse_sample_ratio,
+    parse_span_data_max_length,
+)
 
 
 def _iso_timestamp(seconds: int) -> str:
@@ -161,6 +166,42 @@ class AgentExampleTests(unittest.TestCase):
                     "generation",
                 },
             )
+        finally:
+            processor.shutdown()
+
+    def test_truncates_large_payload_to_configured_limit(self) -> None:
+        exporter = InMemorySpanExporter()
+        processor = OpenTelemetryTracingProcessor(
+            "http://127.0.0.1:9",
+            "test-agent",
+            span_exporter=exporter,
+            span_data_max_length=128,
+        )
+        sdk_trace = SimpleNamespace(trace_id="limited-trace", name="limited workflow")
+        span = SimpleNamespace(
+            trace_id=sdk_trace.trace_id,
+            span_id="large-output",
+            parent_id=None,
+            span_data=_span_data("generation", output="sensitive " * 100),
+            started_at=_iso_timestamp(1),
+            ended_at=_iso_timestamp(2),
+            error=None,
+        )
+        processor.on_trace_start(sdk_trace)
+        processor.on_span_start(span)
+        processor.on_span_end(span)
+        processor.on_trace_end(sdk_trace)
+        processor.force_flush()
+
+        try:
+            exported = next(
+                finished
+                for finished in exporter.get_finished_spans()
+                if finished.name == "generation"
+            )
+            payload = exported.attributes["openai_agents.span_data"]
+            self.assertLessEqual(len(payload), 128)
+            self.assertTrue(json.loads(payload)["truncated"])
         finally:
             processor.shutdown()
 
@@ -330,6 +371,9 @@ class AgentExampleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "OTEL_TRACE_SAMPLE_RATIO"):
             parse_sample_ratio("not a number")
         self.assertEqual(parse_sample_ratio("0.5"), 0.5)
+        self.assertEqual(parse_span_data_max_length("1024"), 1024)
+        with self.assertRaisesRegex(ValueError, "OTEL_SPAN_DATA_MAX_LENGTH"):
+            parse_span_data_max_length("64")
 
     def test_endpoint_requires_http_or_https_scheme(self) -> None:
         for endpoint in ("localhost:4317", "ftp://host"):

@@ -26,7 +26,11 @@ from agents import (  # noqa: E402
     set_trace_processors,
 )
 
-from otel_tracing import OpenTelemetryTracingProcessor, parse_sample_ratio  # noqa: E402
+from otel_tracing import (  # noqa: E402
+    OpenTelemetryTracingProcessor,
+    parse_sample_ratio,
+    parse_span_data_max_length,
+)
 
 
 def get_otlp_endpoint() -> str:
@@ -52,7 +56,15 @@ if __name__ == "__main__":
     endpoint = get_otlp_endpoint()
     service_name = os.getenv("OTEL_SERVICE_NAME", "hello-world-agent")
     sample_ratio = parse_sample_ratio(os.getenv("OTEL_TRACE_SAMPLE_RATIO", "1.0"))
-    processor = OpenTelemetryTracingProcessor(endpoint, service_name, sample_ratio)
+    span_data_max_length = parse_span_data_max_length(
+        os.getenv("OTEL_SPAN_DATA_MAX_LENGTH", "16384")
+    )
+    processor = OpenTelemetryTracingProcessor(
+        endpoint,
+        service_name,
+        sample_ratio,
+        span_data_max_length=span_data_max_length,
+    )
     set_trace_processors([processor])
     try:
         result = Runner.run_sync(

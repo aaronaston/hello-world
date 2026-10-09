@@ -94,6 +94,7 @@ All settings are optional:
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Fallback OTLP gRPC endpoint. |
 | `OTEL_SERVICE_NAME` | `hello-world-agent` | Service name shown in Jaeger. |
 | `OTEL_TRACE_SAMPLE_RATIO` | `1.0` | Parent-based sampling ratio from `0.0` (none) to `1.0` (all). |
+| `OTEL_SPAN_DATA_MAX_LENGTH` | `16384` | Maximum characters per serialized span payload; must be at least `128`. |
 
 Use a gRPC endpoint, not the Collector’s HTTP port `4318`. An `http://` endpoint
 uses plaintext transport; `https://` uses TLS.
@@ -104,7 +105,10 @@ This example replaces the Agents SDK’s default trace exporter with OTLP, so
 traces go to the configured Collector rather than the OpenAI Traces dashboard.
 Sensitive-data tracing is explicitly enabled. Span details exported to Jaeger
 include model inputs and outputs and tool arguments and results, allowing you
-to inspect what the agent received and produced.
+to inspect what the agent received and produced. Payloads longer than
+`OTEL_SPAN_DATA_MAX_LENGTH` are truncated and marked in the span attribute; raise
+the limit to keep more detail, keeping Collector/Jaeger message-size limits in
+mind.
 
 These traces can contain prompts, personal data, or other secrets. The local
 Jaeger UI is bound to localhost, but data is still sent to the configured

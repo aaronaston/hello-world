@@ -19,6 +19,7 @@ from opentelemetry.trace import Span as OtelSpan
 from opentelemetry.trace import Status, StatusCode
 
 _SAMPLE_RATIO_ERROR = "OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 1.0"
+_SPAN_DATA_LENGTH_ERROR = "OTEL_SPAN_DATA_MAX_LENGTH must be an integer of at least 128"
 
 
 def _validate_sample_ratio(sample_ratio: float) -> float:
@@ -33,6 +34,41 @@ def parse_sample_ratio(value: str) -> float:
     except ValueError as error:
         raise ValueError(_SAMPLE_RATIO_ERROR) from error
     return _validate_sample_ratio(sample_ratio)
+
+
+def parse_span_data_max_length(value: str) -> int:
+    try:
+        max_length = int(value)
+    except ValueError as error:
+        raise ValueError(_SPAN_DATA_LENGTH_ERROR) from error
+    if max_length < 128:
+        raise ValueError(_SPAN_DATA_LENGTH_ERROR)
+    return max_length
+
+
+def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
+    serialized = json.dumps(span_data, default=str, ensure_ascii=False)
+    if len(serialized) <= max_length:
+        return serialized
+
+    def encode_preview(length: int) -> str:
+        return json.dumps(
+            {
+                "truncated": True,
+                "original_length": len(serialized),
+                "preview": serialized[:length],
+            },
+            ensure_ascii=False,
+        )
+
+    low, high = 0, len(serialized)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(encode_preview(middle)) <= max_length:
+            low = middle
+        else:
+            high = middle - 1
+    return encode_preview(low)
 
 
 def _timestamp_ns(value: str | None) -> int | None:
@@ -67,11 +103,14 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         service_name: str,
         sample_ratio: float = 1.0,
         span_exporter: SpanExporter | None = None,
+        span_data_max_length: int = 16_384,
     ) -> None:
         """Create an OTLP exporter with the selected resource and sampling settings."""
         if not endpoint.lower().startswith(("http://", "https://")):
             raise ValueError("endpoint must be an http:// or https:// URL")
         sample_ratio = _validate_sample_ratio(sample_ratio)
+        if span_data_max_length < 128:
+            raise ValueError(_SPAN_DATA_LENGTH_ERROR)
 
         exporter = span_exporter or OTLPSpanExporter(
             endpoint=endpoint,
@@ -91,6 +130,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         self._tracer = provider.get_tracer("openai-agents")
         self._traces: dict[str, OtelSpan] = {}
         self._spans: dict[str, dict[str, tuple[OtelSpan, int | None]]] = {}
+        self._span_data_max_length = span_data_max_length
         self._lock = RLock()
 
     def on_trace_start(self, sdk_trace: Trace) -> None:
@@ -158,7 +198,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 span_data = span.span_data.export()
                 otel_span.set_attribute(
                     "openai_agents.span_data",
-                    json.dumps(span_data, default=str, ensure_ascii=False),
+                    _serialize_span_data(span_data, self._span_data_max_length),
                 )
                 if span.error is not None:
                     otel_span.set_status(Status(StatusCode.ERROR, "Agent operation failed"))
