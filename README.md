@@ -49,10 +49,17 @@ The Collector listens for OTLP on localhost ports `4317` (gRPC) and `4318`
 
 ## 3. Configure and run the agent
 
-Set an OpenAI API key in your shell, then run the example:
+Create `openai-agents/.env` with your API key:
+
+```dotenv
+OPENAI_API_KEY=your-api-key
+```
+
+The `.env` file is ignored by Git. Alternatively, set `OPENAI_API_KEY` in your
+shell. Shell environment variables take precedence over values in `.env`. Then
+run the example:
 
 ```bash
-export OPENAI_API_KEY=your-api-key
 python hello_agent.py
 ```
 
