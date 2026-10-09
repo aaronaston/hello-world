@@ -24,6 +24,9 @@ _SAMPLE_RATIO_ERROR = "OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 
 _SPAN_DATA_LENGTH_ERROR = "OTEL_SPAN_DATA_MAX_LENGTH must be an integer of at least 128"
 _SENSITIVE_DATA_ERROR = "OTEL_TRACE_INCLUDE_SENSITIVE_DATA must be true or false"
 _MIN_SPAN_DATA_LENGTH = 128
+_RESPONSE_SPAN_TYPE = "response"
+_RESPONSE_INPUT_FIELD = "input"
+_RESPONSE_OUTPUT_FIELD = "output"
 # Progressively smaller limits keep previews useful as the attribute budget shrinks.
 _SPAN_PREVIEW_DEPTH = 3
 _SPAN_PREVIEW_RETRIES = ((8, 8), (16, 4), (32, 2), (64, 1))
@@ -81,6 +84,7 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
             return no_model_dump
         object_id = id(value)
         if object_id not in model_dump_cache:
+            # Retain the source object so its id cannot be reused during serialization.
             try:
                 dumped = model_dump(mode="json", exclude_none=True)
             except Exception as error:
@@ -174,13 +178,18 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
 def _export_span_data(span_data: Any) -> dict[str, Any]:
     """Export SDK span data, including payloads omitted by ResponseSpanData.export()."""
     exported = dict(span_data.export())
-    if span_data.type == "response":
+    if span_data.type == _RESPONSE_SPAN_TYPE:
         input_data = getattr(span_data, "input", None)
         response = getattr(span_data, "response", None)
         if input_data is not None:
-            exported["input"] = input_data
+            exported[_RESPONSE_INPUT_FIELD] = input_data
         if response is not None:
-            exported["output"] = response
+            exported[_RESPONSE_OUTPUT_FIELD] = response
+        if input_data is None and response is None:
+            _logger.debug(
+                "Responses API span has no prompt or response payload; "
+                "the SDK may have redacted or omitted it"
+            )
     return exported
 
 

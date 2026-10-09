@@ -263,14 +263,18 @@ class AgentExampleTests(unittest.TestCase):
             },
         )
 
+        with self.assertLogs("otel_tracing", level="DEBUG") as captured:
+            exported = _export_span_data(span_data)
+
         self.assertEqual(
-            _export_span_data(span_data),
+            exported,
             {
                 "type": "response",
                 "response_id": "response_123",
                 "usage": {"input_tokens": 12},
             },
         )
+        self.assertIn("no prompt or response payload", captured.output[0])
 
     def test_response_span_enrichment_does_not_mutate_exported_dict(self) -> None:
         base_export = {"type": "response", "response_id": "response_123"}
