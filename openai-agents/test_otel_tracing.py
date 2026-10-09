@@ -525,7 +525,7 @@ class AgentExampleTests(unittest.TestCase):
             exported = next(
                 finished
                 for finished in exporter.get_finished_spans()
-                if finished.name == "generation"
+                if finished.name == "response"
             )
             self.assertNotIn("openai_agents.span_data", exported.attributes)
         finally:
