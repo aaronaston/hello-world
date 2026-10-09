@@ -11,7 +11,12 @@ import warnings
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from agents.tracing.traces import TraceImpl
-from hello_agent import get_otlp_endpoint, load_environment, warn_if_remote_sensitive_endpoint
+from hello_agent import (
+    get_include_sensitive_data,
+    get_otlp_endpoint,
+    load_environment,
+    warn_if_remote_sensitive_endpoint,
+)
 from otel_tracing import (
     OpenTelemetryTracingProcessor,
     _timestamp_ns,
@@ -87,6 +92,9 @@ class AgentExampleTests(unittest.TestCase):
             warn_if_remote_sensitive_endpoint("http://127.0.0.1:4317", True)
             warn_if_remote_sensitive_endpoint("https://collector.example:4317", False)
             self.assertEqual(caught, [])
+        self.assertTrue(get_include_sensitive_data("http://localhost:4317", None))
+        self.assertFalse(get_include_sensitive_data("https://collector.example:4317", None))
+        self.assertTrue(get_include_sensitive_data("https://collector.example:4317", "true"))
 
     def test_exports_nested_spans_with_payload_attributes(self) -> None:
         exporter = InMemorySpanExporter()
@@ -212,8 +220,9 @@ class AgentExampleTests(unittest.TestCase):
             )
             payload = exported.attributes["openai_agents.span_data"]
             self.assertLessEqual(len(payload), 128)
-            self.assertTrue(payload.startswith("{"))
-            self.assertIn("[truncated;", payload)
+            decoded = json.loads(payload)
+            self.assertTrue(decoded["truncated"])
+            self.assertLessEqual(len(json.dumps(decoded)), 128)
         finally:
             processor.shutdown()
 

@@ -44,15 +44,22 @@ def get_otlp_endpoint() -> str:
     )
 
 
-def warn_if_remote_sensitive_endpoint(endpoint: str, include_sensitive_data: bool) -> None:
-    if not include_sensitive_data:
-        return
+def is_loopback_endpoint(endpoint: str) -> bool:
     hostname = urlsplit(endpoint).hostname
     try:
-        is_loopback = hostname is not None and ipaddress.ip_address(hostname).is_loopback
+        return hostname is not None and ipaddress.ip_address(hostname).is_loopback
     except ValueError:
-        is_loopback = hostname == "localhost"
-    if not is_loopback:
+        return hostname == "localhost"
+
+
+def get_include_sensitive_data(endpoint: str, setting: str | None) -> bool:
+    if setting is None:
+        return is_loopback_endpoint(endpoint)
+    return parse_include_sensitive_data(setting)
+
+
+def warn_if_remote_sensitive_endpoint(endpoint: str, include_sensitive_data: bool) -> None:
+    if include_sensitive_data and not is_loopback_endpoint(endpoint):
         warnings.warn(
             "Sensitive agent trace payloads are enabled and will be sent to a non-loopback "
             "OTLP endpoint.",
@@ -80,8 +87,9 @@ if __name__ == "__main__":
     span_data_max_length = parse_span_data_max_length(
         os.getenv("OTEL_SPAN_DATA_MAX_LENGTH", "16384")
     )
-    include_sensitive_data = parse_include_sensitive_data(
-        os.getenv("OTEL_TRACE_INCLUDE_SENSITIVE_DATA", "true")
+    include_sensitive_data = get_include_sensitive_data(
+        endpoint,
+        os.getenv("OTEL_TRACE_INCLUDE_SENSITIVE_DATA"),
     )
     warn_if_remote_sensitive_endpoint(endpoint, include_sensitive_data)
     processor = OpenTelemetryTracingProcessor(

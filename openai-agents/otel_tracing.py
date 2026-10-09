@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from itertools import islice
 from math import isfinite
 from threading import RLock
 from time import time_ns
@@ -63,8 +64,30 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
     if len(serialized) <= max_length:
         return serialized
 
-    suffix = f"...[truncated; {len(serialized)} serialized characters total]"
-    return serialized[: max_length - len(suffix)] + suffix
+    def preview_value(value: Any, string_limit: int, depth: int = 0) -> Any:
+        if isinstance(value, str):
+            return value[:string_limit]
+        if depth >= 3:
+            return "[nested value omitted]"
+        if isinstance(value, dict):
+            return {
+                key: preview_value(item, string_limit, depth + 1)
+                for key, item in islice(value.items(), 8)
+            }
+        if isinstance(value, (list, tuple)):
+            return [preview_value(item, string_limit, depth + 1) for item in value[:8]]
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        return preview_value(str(value), string_limit, depth + 1)
+
+    envelope = {"truncated": True, "original_length": len(serialized), "preview": {}}
+    for divisor in (8, 16, 32):
+        envelope["preview"] = preview_value(span_data, max_length // divisor)
+        truncated = json.dumps(envelope, default=str, ensure_ascii=False)
+        if len(truncated) <= max_length:
+            return truncated
+    envelope["preview"] = {}
+    return json.dumps(envelope, ensure_ascii=False)
 
 
 def _timestamp_ns(value: str | None) -> int | None:
@@ -204,9 +227,12 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                     "openai_agents.span_data",
                     _serialize_span_data(span_data, self._span_data_max_length),
                 )
-        except Exception:
+        except Exception as error:
             otel_span.set_status(Status(StatusCode.ERROR, "Trace payload serialization failed"))
-            _logger.warning("Failed to export Agent SDK span payload; omitting it")
+            _logger.warning(
+                "Failed to export Agent SDK span payload (%s); omitting it",
+                type(error).__name__,
+            )
         finally:
             otel_span.end(end_time=_timestamp_ns(span.ended_at))
 

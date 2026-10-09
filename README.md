@@ -95,7 +95,7 @@ All settings are optional:
 | `OTEL_SERVICE_NAME` | `hello-world-agent` | Service name shown in Jaeger. |
 | `OTEL_TRACE_SAMPLE_RATIO` | `1.0` | Parent-based sampling ratio from `0.0` (none) to `1.0` (all). |
 | `OTEL_SPAN_DATA_MAX_LENGTH` | `16384` | Maximum characters per serialized span payload; must be at least `128`. |
-| `OTEL_TRACE_INCLUDE_SENSITIVE_DATA` | `true` | Set to `false` to omit model/tool payloads from both SDK capture and Jaeger export. Accepts `true`, `false`, `1`, or `0`. |
+| `OTEL_TRACE_INCLUDE_SENSITIVE_DATA` | `true` for localhost; `false` otherwise | Set explicitly to `true` or `false` to control model/tool payload capture in both the SDK and Jaeger export. Accepts `true`, `false`, `1`, or `0`. |
 
 Use a gRPC endpoint, not the Collector’s HTTP port `4318`. An `http://` endpoint
 uses plaintext transport; `https://` uses TLS.
@@ -104,21 +104,23 @@ uses plaintext transport; `https://` uses TLS.
 
 This example replaces the Agents SDK’s default trace exporter with OTLP, so
 traces go to the configured Collector rather than the OpenAI Traces dashboard.
-Sensitive-data tracing is explicitly enabled. Span details exported to Jaeger
-include model inputs and outputs and tool arguments and results, allowing you
-to inspect what the agent received and produced. Payloads longer than
-`OTEL_SPAN_DATA_MAX_LENGTH` are truncated and marked in the span attribute; raise
-the limit to keep more detail, keeping Collector/Jaeger message-size limits in
-mind. The limit caps the exported attribute, not the work of building the SDK
-payload and serializing it before truncation, so exceptionally large payloads
-can still consume memory and CPU.
+For localhost endpoints, sensitive-data tracing is enabled by default. Span
+details exported to Jaeger include model inputs and outputs and tool arguments
+and results, allowing you to inspect what the agent received and produced. For
+non-loopback endpoints, sensitive-data tracing defaults to off; explicitly set
+`OTEL_TRACE_INCLUDE_SENSITIVE_DATA=true` to enable it, which emits a warning.
+Payloads longer than `OTEL_SPAN_DATA_MAX_LENGTH` are truncated into a valid JSON
+preview; raise the limit to keep more detail, keeping Collector/Jaeger
+message-size limits in mind. The limit caps the exported attribute, not the work
+of building the SDK payload and serializing it before truncation, so
+exceptionally large payloads can still consume memory and CPU.
 
 These traces can contain prompts, personal data, or other secrets. The local
 Jaeger UI is bound to localhost, but data is still sent to the configured
 Collector and retained according to the Jaeger setup. Use only with data you
 are allowed to send there. Set `OTEL_TRACE_INCLUDE_SENSITIVE_DATA=false` to
 disable capture and export before using real user data or a shared/production
-collector.
+collector. Non-local endpoints default to this safer setting.
 
 ## Stop the services
 
