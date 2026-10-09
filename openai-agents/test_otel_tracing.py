@@ -390,7 +390,6 @@ class AgentExampleTests(unittest.TestCase):
             },
             **{f"extra-{index}": "x" * 500 for index in range(8)},
         }
-
         truncated = _serialize_span_data(payload, 512)
         decoded = json.loads(truncated)
         preview = decoded["preview"]
@@ -416,11 +415,18 @@ class AgentExampleTests(unittest.TestCase):
                 raise AssertionError("preview must not stringify arbitrary keys")
 
         truncated = _serialize_span_data(
-            {ExplodingKey(): "opaque key value", "large": "x" * 1_000},
+            {
+                ExplodingKey(): "opaque key value",
+                float("nan"): "non-finite numeric key",
+                "large": "x" * 1_000,
+            },
             128,
         )
 
-        self.assertNotIn("<ExplodingKey>", json.loads(truncated)["preview"])
+        preview = json.loads(truncated)["preview"]
+        self.assertNotIn("<ExplodingKey>", preview)
+        self.assertIn("NaN", preview)
+        self.assertIn("large", preview)
 
     def test_model_dump_runs_once_when_payload_is_truncated(self) -> None:
         dump_count = 0

@@ -85,6 +85,7 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
         object_id = id(value)
         if object_id not in model_dump_cache:
             # Retain the source object so its id cannot be reused during serialization.
+            # SDK model_dump() has no streaming interface, so each object is converted whole.
             try:
                 dumped = model_dump(mode="json", exclude_none=True)
             except Exception as error:
@@ -140,6 +141,11 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
         if depth >= _SPAN_PREVIEW_DEPTH:
             return "[nested value omitted]"
         if isinstance(value, dict):
+            valid_items = (
+                (key, item)
+                for key, item in value.items()
+                if isinstance(key, (str, bool, int, float)) or key is None
+            )
             return {
                 (
                     key
@@ -147,8 +153,7 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
                     else json.dumps(key, ensure_ascii=False)
                 )[:string_limit]:
                 preview_value(item, string_limit, item_limit, depth + 1)
-                for key, item in islice(value.items(), item_limit)
-                if isinstance(key, (str, bool, int, float)) or key is None
+                for key, item in islice(valid_items, item_limit)
             }
         return [
             preview_value(item, string_limit, item_limit, depth + 1)
@@ -175,7 +180,7 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
 
 
 def _export_span_data(span_data: Any) -> dict[str, Any]:
-    """Export SDK span data, including payloads omitted by ResponseSpanData.export()."""
+    """Add response payload references for immediate synchronous serialization."""
     exported = dict(span_data.export())
     if span_data.type == _RESPONSE_SPAN_TYPE:
         input_data = getattr(span_data, "input", None)
