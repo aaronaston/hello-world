@@ -250,6 +250,26 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
             parse_sample_ratio("not a number")
         self.assertEqual(parse_sample_ratio("0.5"), 0.5)
 
+    def test_endpoint_requires_http_or_https_scheme(self) -> None:
+        for endpoint in ("localhost:4317", "ftp://host"):
+            with self.subTest(endpoint=endpoint), self.assertRaisesRegex(
+                ValueError, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+            ):
+                OpenTelemetryTracingProcessor(
+                    endpoint,
+                    "test-agent",
+                    span_exporter=InMemorySpanExporter(),
+                )
+
+        for endpoint in ("http://localhost:4317", "https://collector.example:4317"):
+            with self.subTest(endpoint=endpoint):
+                processor = OpenTelemetryTracingProcessor(
+                    endpoint,
+                    "test-agent",
+                    span_exporter=InMemorySpanExporter(),
+                )
+                processor.shutdown()
+
     def test_timestamp_conversion_preserves_microseconds(self) -> None:
         self.assertEqual(
             _timestamp_ns("1970-01-01T00:00:01.123456Z"),

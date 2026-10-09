@@ -68,7 +68,10 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     ) -> None:
         """Create an OTLP exporter with the selected resource and sampling settings."""
         if not endpoint.lower().startswith(("http://", "https://")):
-            raise ValueError("OTEL_EXPORTER_OTLP endpoint must start with http:// or https://")
+            raise ValueError(
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT "
+                "must be an http:// or https:// URL"
+            )
         sample_ratio = _validate_sample_ratio(sample_ratio)
 
         provider = TracerProvider(
