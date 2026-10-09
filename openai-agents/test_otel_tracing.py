@@ -14,6 +14,7 @@ from hello_agent import get_otlp_endpoint, load_environment
 from otel_tracing import (
     OpenTelemetryTracingProcessor,
     _timestamp_ns,
+    parse_include_sensitive_data,
     parse_sample_ratio,
     parse_span_data_max_length,
 )
@@ -182,6 +183,7 @@ class AgentExampleTests(unittest.TestCase):
             trace_id=sdk_trace.trace_id,
             span_id="large-output",
             parent_id=None,
+            # NUL expands to six characters in JSON, exercising worst-case preview escaping.
             span_data=_span_data("generation", output="\x00" * 100),
             started_at=_iso_timestamp(1),
             ended_at=_iso_timestamp(2),
@@ -374,6 +376,44 @@ class AgentExampleTests(unittest.TestCase):
         self.assertEqual(parse_span_data_max_length("1024"), 1024)
         with self.assertRaisesRegex(ValueError, "OTEL_SPAN_DATA_MAX_LENGTH"):
             parse_span_data_max_length("64")
+        self.assertTrue(parse_include_sensitive_data("true"))
+        self.assertFalse(parse_include_sensitive_data("false"))
+        with self.assertRaisesRegex(ValueError, "OTEL_TRACE_INCLUDE_SENSITIVE_DATA"):
+            parse_include_sensitive_data("sometimes")
+
+    def test_sensitive_payload_export_can_be_disabled(self) -> None:
+        exporter = InMemorySpanExporter()
+        processor = OpenTelemetryTracingProcessor(
+            "http://127.0.0.1:9",
+            "test-agent",
+            span_exporter=exporter,
+            include_span_data=False,
+        )
+        sdk_trace = SimpleNamespace(trace_id="redacted-trace", name="redacted workflow")
+        span = SimpleNamespace(
+            trace_id=sdk_trace.trace_id,
+            span_id="redacted-generation",
+            parent_id=None,
+            span_data=_span_data("generation", input="private prompt", output="private answer"),
+            started_at=_iso_timestamp(1),
+            ended_at=_iso_timestamp(2),
+            error=None,
+        )
+        processor.on_trace_start(sdk_trace)
+        processor.on_span_start(span)
+        processor.on_span_end(span)
+        processor.on_trace_end(sdk_trace)
+        processor.force_flush()
+
+        try:
+            exported = next(
+                finished
+                for finished in exporter.get_finished_spans()
+                if finished.name == "generation"
+            )
+            self.assertNotIn("openai_agents.span_data", exported.attributes)
+        finally:
+            processor.shutdown()
 
     def test_endpoint_requires_http_or_https_scheme(self) -> None:
         for endpoint in ("localhost:4317", "ftp://host"):

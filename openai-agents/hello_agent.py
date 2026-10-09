@@ -28,6 +28,7 @@ from agents import (  # noqa: E402
 
 from otel_tracing import (  # noqa: E402
     OpenTelemetryTracingProcessor,
+    parse_include_sensitive_data,
     parse_sample_ratio,
     parse_span_data_max_length,
 )
@@ -59,18 +60,22 @@ if __name__ == "__main__":
     span_data_max_length = parse_span_data_max_length(
         os.getenv("OTEL_SPAN_DATA_MAX_LENGTH", "16384")
     )
+    include_sensitive_data = parse_include_sensitive_data(
+        os.getenv("OTEL_TRACE_INCLUDE_SENSITIVE_DATA", "true")
+    )
     processor = OpenTelemetryTracingProcessor(
         endpoint,
         service_name,
         sample_ratio,
         span_data_max_length=span_data_max_length,
+        include_span_data=include_sensitive_data,
     )
     set_trace_processors([processor])
     try:
         result = Runner.run_sync(
             agent,
             "What's the weather in Paris?",
-            run_config=RunConfig(trace_include_sensitive_data=True),
+            run_config=RunConfig(trace_include_sensitive_data=include_sensitive_data),
         )
         print(result.final_output)
     finally:

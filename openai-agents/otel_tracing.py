@@ -20,6 +20,7 @@ from opentelemetry.trace import Status, StatusCode
 
 _SAMPLE_RATIO_ERROR = "OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 1.0"
 _SPAN_DATA_LENGTH_ERROR = "OTEL_SPAN_DATA_MAX_LENGTH must be an integer of at least 128"
+_SENSITIVE_DATA_ERROR = "OTEL_TRACE_INCLUDE_SENSITIVE_DATA must be true or false"
 
 
 def _validate_sample_ratio(sample_ratio: float) -> float:
@@ -44,6 +45,15 @@ def parse_span_data_max_length(value: str) -> int:
     if max_length < 128:
         raise ValueError(_SPAN_DATA_LENGTH_ERROR)
     return max_length
+
+
+def parse_include_sensitive_data(value: str) -> bool:
+    normalized = value.lower()
+    if normalized in {"true", "1"}:
+        return True
+    if normalized in {"false", "0"}:
+        return False
+    raise ValueError(_SENSITIVE_DATA_ERROR)
 
 
 def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
@@ -96,6 +106,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         sample_ratio: float = 1.0,
         span_exporter: SpanExporter | None = None,
         span_data_max_length: int = 16_384,
+        include_span_data: bool = True,
     ) -> None:
         """Create an OTLP exporter with the selected resource and sampling settings."""
         if not endpoint.lower().startswith(("http://", "https://")):
@@ -123,6 +134,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         self._traces: dict[str, OtelSpan] = {}
         self._spans: dict[str, dict[str, tuple[OtelSpan, int | None]]] = {}
         self._span_data_max_length = span_data_max_length
+        self._include_span_data = include_span_data
         self._lock = RLock()
 
     def on_trace_start(self, sdk_trace: Trace) -> None:
@@ -190,11 +202,12 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
         otel_span, _ = span_entry
         try:
-            span_data = span.span_data.export()
-            otel_span.set_attribute(
-                "openai_agents.span_data",
-                _serialize_span_data(span_data, self._span_data_max_length),
-            )
+            if self._include_span_data:
+                span_data = span.span_data.export()
+                otel_span.set_attribute(
+                    "openai_agents.span_data",
+                    _serialize_span_data(span_data, self._span_data_max_length),
+                )
             if span.error is not None:
                 otel_span.set_status(Status(StatusCode.ERROR, "Agent operation failed"))
         finally:
