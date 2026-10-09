@@ -381,6 +381,22 @@ class AgentExampleTests(unittest.TestCase):
             "<object>",
         )
 
+    def test_model_dump_runs_once_when_payload_is_truncated(self) -> None:
+        dump_count = 0
+
+        def model_dump(**kwargs: object) -> dict[str, str]:
+            nonlocal dump_count
+            dump_count += 1
+            return {"output": "x" * 1_000}
+
+        payload = _serialize_span_data(
+            {"response": SimpleNamespace(model_dump=model_dump)},
+            128,
+        )
+
+        self.assertTrue(json.loads(payload)["truncated"])
+        self.assertEqual(dump_count, 1)
+
     def test_trace_end_closes_unfinished_spans(self) -> None:
         exporter = InMemorySpanExporter()
         processor = OpenTelemetryTracingProcessor(

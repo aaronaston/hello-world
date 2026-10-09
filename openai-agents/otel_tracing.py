@@ -72,10 +72,25 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
     if max_length < _MIN_SPAN_DATA_LENGTH:
         raise ValueError(_SPAN_DATA_LENGTH_ERROR)
 
-    def unsupported_value(value: Any) -> Any:
+    model_dump_cache: dict[int, tuple[Any, Any]] = {}
+    no_model_dump = object()
+
+    def dump_model(value: Any) -> Any:
         model_dump = getattr(value, "model_dump", None)
-        if callable(model_dump):
-            return model_dump(mode="json", exclude_none=True)
+        if not callable(model_dump):
+            return no_model_dump
+        object_id = id(value)
+        if object_id not in model_dump_cache:
+            model_dump_cache[object_id] = (
+                value,
+                model_dump(mode="json", exclude_none=True),
+            )
+        return model_dump_cache[object_id][1]
+
+    def unsupported_value(value: Any) -> Any:
+        dumped = dump_model(value)
+        if dumped is not no_model_dump:
+            return dumped
         return f"<{type(value).__name__}>"
 
     encoder = json.JSONEncoder(default=unsupported_value, ensure_ascii=False)
@@ -99,10 +114,10 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
             return value[:string_limit]
         if value is None or isinstance(value, (bool, int, float)):
             return value
-        model_dump = getattr(value, "model_dump", None)
-        if callable(model_dump):
+        dumped = dump_model(value)
+        if dumped is not no_model_dump:
             return preview_value(
-                model_dump(mode="json", exclude_none=True),
+                dumped,
                 string_limit,
                 item_limit,
                 depth,
@@ -117,11 +132,10 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
                 preview_value(item, string_limit, item_limit, depth + 1)
                 for key, item in islice(value.items(), item_limit)
             }
-        if isinstance(value, (list, tuple)):
-            return [
-                preview_value(item, string_limit, item_limit, depth + 1)
-                for item in islice(value, item_limit)
-            ]
+        return [
+            preview_value(item, string_limit, item_limit, depth + 1)
+            for item in islice(value, item_limit)
+        ]
 
     envelope = {"truncated": True, "preview": {}}
     for divisor, item_limit in _SPAN_PREVIEW_RETRIES:
