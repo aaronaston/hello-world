@@ -17,6 +17,18 @@ from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from opentelemetry.trace import Span as OtelSpan
 from opentelemetry.trace import Status, StatusCode
 
+_SAMPLE_RATIO_ERROR = "OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 1.0"
+
+
+def parse_sample_ratio(value: str) -> float:
+    try:
+        sample_ratio = float(value)
+    except ValueError as error:
+        raise ValueError(_SAMPLE_RATIO_ERROR) from error
+    if not isfinite(sample_ratio) or not 0.0 <= sample_ratio <= 1.0:
+        raise ValueError(_SAMPLE_RATIO_ERROR)
+    return sample_ratio
+
 
 def _timestamp_ns(value: str | None) -> int | None:
     """Convert SDK timestamps with integer arithmetic to preserve microsecond precision."""
@@ -52,7 +64,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     ) -> None:
         """Create an OTLP exporter with the selected resource and sampling settings."""
         if not isfinite(sample_ratio) or not 0.0 <= sample_ratio <= 1.0:
-            raise ValueError("OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 1.0")
+            raise ValueError(_SAMPLE_RATIO_ERROR)
 
         provider = TracerProvider(
             resource=Resource.create({"service.name": service_name}),

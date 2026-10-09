@@ -1,17 +1,25 @@
 """Minimal OpenAI Agents SDK example: an agent with one function tool.
 
-Run: export OPENAI_API_KEY=...; python hello_agent.py
+Run: add OPENAI_API_KEY=... to .env (or export it in your shell); python hello_agent.py
 Docs: https://openai.github.io/openai-agents-python/
 """
 import os
 
 from dotenv import load_dotenv
 
+# Load credentials before importing the SDK, which may read environment configuration.
 load_dotenv()
 
-from agents import Agent, RunConfig, Runner, flush_traces, function_tool, set_trace_processors
+from agents import (  # noqa: E402
+    Agent,
+    RunConfig,
+    Runner,
+    flush_traces,
+    function_tool,
+    set_trace_processors,
+)
 
-from otel_tracing import OpenTelemetryTracingProcessor
+from otel_tracing import OpenTelemetryTracingProcessor, parse_sample_ratio  # noqa: E402
 
 
 @function_tool
@@ -32,10 +40,7 @@ if __name__ == "__main__":
         os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
     )
     service_name = os.getenv("OTEL_SERVICE_NAME", "hello-world-agent")
-    try:
-        sample_ratio = float(os.getenv("OTEL_TRACE_SAMPLE_RATIO", "1.0"))
-    except ValueError as error:
-        raise ValueError("OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 1.0") from error
+    sample_ratio = parse_sample_ratio(os.getenv("OTEL_TRACE_SAMPLE_RATIO", "1.0"))
     processor = OpenTelemetryTracingProcessor(endpoint, service_name, sample_ratio)
     set_trace_processors([processor])
     try:

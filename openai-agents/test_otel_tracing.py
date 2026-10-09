@@ -4,7 +4,7 @@ import unittest
 
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from otel_tracing import OpenTelemetryTracingProcessor, _timestamp_ns
+from otel_tracing import OpenTelemetryTracingProcessor, _timestamp_ns, parse_sample_ratio
 
 
 def _iso_timestamp(seconds: int) -> str:
@@ -184,6 +184,9 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
                     sample_ratio=ratio,
                     span_exporter=InMemorySpanExporter(),
                 )
+        with self.assertRaisesRegex(ValueError, "OTEL_TRACE_SAMPLE_RATIO"):
+            parse_sample_ratio("not a number")
+        self.assertEqual(parse_sample_ratio("0.5"), 0.5)
 
     def test_timestamp_conversion_preserves_microseconds(self) -> None:
         self.assertEqual(
