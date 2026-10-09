@@ -54,9 +54,9 @@ def _timestamp_ns(value: str | None) -> int | None:
 class OpenTelemetryTracingProcessor(TracingProcessor):
     """Export Agents SDK spans through OTLP gRPC without prompt or tool payloads.
 
-    `endpoint` must be a gRPC address. `sample_ratio` sets parent-based head
-    sampling between 0.0 and 1.0. Plaintext transport is enabled for `http://`
-    endpoints; use `https://` for TLS.
+    `endpoint` must be an `http://` or `https://` gRPC URL. `sample_ratio` sets
+    parent-based head sampling between 0.0 and 1.0. HTTP URLs use plaintext;
+    HTTPS URLs use TLS.
     """
 
     def __init__(
@@ -67,6 +67,8 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         span_exporter: SpanExporter | None = None,
     ) -> None:
         """Create an OTLP exporter with the selected resource and sampling settings."""
+        if not endpoint.lower().startswith(("http://", "https://")):
+            raise ValueError("OTEL_EXPORTER_OTLP endpoint must start with http:// or https://")
         sample_ratio = _validate_sample_ratio(sample_ratio)
 
         provider = TracerProvider(

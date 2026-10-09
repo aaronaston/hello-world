@@ -121,9 +121,6 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
         processor.on_trace_start(sdk_trace)
         processor.on_span_start(agent_span)
         processor.on_trace_end(sdk_trace)
-        processor.on_span_end(agent_span)
-        processor.on_trace_end(sdk_trace)
-        processor.on_span_start(agent_span)
         processor.force_flush()
 
         spans = exporter.get_finished_spans()
@@ -133,11 +130,76 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
             self.assertEqual(agent.end_time, agent.start_time)
             workflow = next(span for span in spans if span.name == "unfinished workflow")
             self.assertEqual(workflow.end_time, agent.end_time)
+        finally:
+            processor.shutdown()
+
+    def test_late_span_end_after_trace_end_is_ignored(self) -> None:
+        exporter = InMemorySpanExporter()
+        processor = OpenTelemetryTracingProcessor(
+            "http://127.0.0.1:9",
+            "test-agent",
+            span_exporter=exporter,
+        )
+        sdk_trace = SimpleNamespace(
+            trace_id="trace_0123456789abcdef0123456789abcdef",
+            name="late end workflow",
+            started_at=_iso_timestamp(1),
+            ended_at=_iso_timestamp(3),
+        )
+        agent_span = SimpleNamespace(
+            trace_id=sdk_trace.trace_id,
+            span_id="agent",
+            parent_id=None,
+            span_data=SimpleNamespace(type="agent", name="Assistant"),
+            started_at=_iso_timestamp(1),
+            ended_at=None,
+            error=None,
+        )
+        processor.on_trace_start(sdk_trace)
+        processor.on_span_start(agent_span)
+        processor.on_trace_end(sdk_trace)
+        processor.on_span_end(agent_span)
+        processor.force_flush()
+        try:
+            spans = exporter.get_finished_spans()
             self.assertEqual(len(spans), 2)
             self.assertEqual(
                 {span.name for span in spans},
-                {"unfinished workflow", "agent: Assistant"},
+                {"late end workflow", "agent: Assistant"},
             )
+        finally:
+            processor.shutdown()
+
+    def test_late_span_start_after_trace_end_is_ignored(self) -> None:
+        exporter = InMemorySpanExporter()
+        processor = OpenTelemetryTracingProcessor(
+            "http://127.0.0.1:9",
+            "test-agent",
+            span_exporter=exporter,
+        )
+        sdk_trace = SimpleNamespace(
+            trace_id="trace_0123456789abcdef0123456789abcdef",
+            name="late start workflow",
+            started_at=_iso_timestamp(1),
+            ended_at=_iso_timestamp(3),
+        )
+        agent_span = SimpleNamespace(
+            trace_id=sdk_trace.trace_id,
+            span_id="late-agent",
+            parent_id=None,
+            span_data=SimpleNamespace(type="agent", name="Late"),
+            started_at=_iso_timestamp(2),
+            ended_at=_iso_timestamp(2),
+            error=None,
+        )
+        processor.on_trace_start(sdk_trace)
+        processor.on_trace_end(sdk_trace)
+        processor.on_span_start(agent_span)
+        processor.force_flush()
+        try:
+            spans = exporter.get_finished_spans()
+            self.assertEqual(len(spans), 1)
+            self.assertEqual(spans[0].name, "late start workflow")
         finally:
             processor.shutdown()
 
