@@ -233,6 +233,7 @@ class AgentExampleTests(unittest.TestCase):
             1: "numeric key",
             "items": list(range(12)),
             "nested": {"level1": {"level2": {"level3": "omitted"}}},
+            "opaque_path": {"level1": {"value": object()}},
             **{f"extra-{index}": "x" * 500 for index in range(8)},
         }
 
@@ -250,6 +251,7 @@ class AgentExampleTests(unittest.TestCase):
             preview["nested"]["level1"]["level2"],
             "[nested value omitted]",
         )
+        self.assertEqual(preview["opaque_path"]["level1"]["value"], "<object>")
 
     def test_trace_end_closes_unfinished_spans(self) -> None:
         exporter = InMemorySpanExporter()

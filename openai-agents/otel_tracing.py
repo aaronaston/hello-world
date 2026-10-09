@@ -24,6 +24,10 @@ _SAMPLE_RATIO_ERROR = "OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 
 _SPAN_DATA_LENGTH_ERROR = "OTEL_SPAN_DATA_MAX_LENGTH must be an integer of at least 128"
 _SENSITIVE_DATA_ERROR = "OTEL_TRACE_INCLUDE_SENSITIVE_DATA must be true or false"
 _MIN_SPAN_DATA_LENGTH = 128
+# The progressively smaller limits keep previews readable while bounding their size.
+_SPAN_PREVIEW_DEPTH = 3
+_SPAN_PREVIEW_ITEMS = 8
+_SPAN_PREVIEW_SIZE_DIVISORS = (8, 16, 32)
 _logger = logging.getLogger(__name__)
 
 
@@ -61,6 +65,14 @@ def parse_include_sensitive_data(value: str) -> bool:
 
 
 def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
+    """Return JSON payload data capped at max_length, or a bounded truncation preview.
+
+    The minimum supported size leaves room for the fallback envelope, ensuring
+    this function's output never exceeds max_length.
+    """
+    if max_length < _MIN_SPAN_DATA_LENGTH:
+        raise ValueError(_SPAN_DATA_LENGTH_ERROR)
+
     def unsupported_value(value: Any) -> str:
         return f"<{type(value).__name__}>"
 
@@ -78,22 +90,30 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
     def preview_value(value: Any, string_limit: int, depth: int = 0) -> Any:
         if isinstance(value, str):
             return value[:string_limit]
-        if depth >= 3:
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        if not isinstance(value, (dict, list, tuple)):
+            return unsupported_value(value)[:string_limit]
+        if depth >= _SPAN_PREVIEW_DEPTH:
             return "[nested value omitted]"
         if isinstance(value, dict):
             return {
                 key[:string_limit] if isinstance(key, str) else str(key)[:string_limit]:
                 preview_value(item, string_limit, depth + 1)
-                for key, item in islice(value.items(), 8)
+                for key, item in islice(value.items(), _SPAN_PREVIEW_ITEMS)
             }
         if isinstance(value, (list, tuple)):
-            return [preview_value(item, string_limit, depth + 1) for item in value[:8]]
-        if value is None or isinstance(value, (bool, int, float)):
-            return value
-        return preview_value(unsupported_value(value), string_limit, depth + 1)
+            return [
+                preview_value(item, string_limit, depth + 1)
+                for item in islice(value, _SPAN_PREVIEW_ITEMS)
+            ]
+        return [
+            preview_value(item, string_limit, depth + 1)
+            for item in islice(value, _SPAN_PREVIEW_ITEMS)
+        ]
 
     envelope = {"truncated": True, "preview": {}}
-    for divisor in (8, 16, 32):
+    for divisor in _SPAN_PREVIEW_SIZE_DIVISORS:
         envelope["preview"] = preview_value(span_data, max_length // divisor)
         truncated = json.dumps(envelope, default=unsupported_value, ensure_ascii=False)
         if len(truncated) <= max_length:
