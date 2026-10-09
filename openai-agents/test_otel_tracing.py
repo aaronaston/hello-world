@@ -16,7 +16,7 @@ def _iso_timestamp(seconds: int) -> str:
     return datetime.fromtimestamp(seconds, timezone.utc).isoformat()
 
 
-class OpenTelemetryTracingProcessorTests(unittest.TestCase):
+class AgentExampleTests(unittest.TestCase):
     def test_loads_values_from_dotenv_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             dotenv_path = Path(directory) / ".env"

@@ -3,6 +3,8 @@
 Run: add OPENAI_API_KEY=... to .env (or export it in your shell); python hello_agent.py
 Docs: https://openai.github.io/openai-agents-python/
 """
+from __future__ import annotations
+
 import os
 
 from dotenv import load_dotenv
