@@ -109,11 +109,11 @@ details exported to Jaeger include model inputs and outputs and tool arguments
 and results, allowing you to inspect what the agent received and produced. For
 non-loopback endpoints, sensitive-data tracing defaults to off; explicitly set
 `OTEL_TRACE_INCLUDE_SENSITIVE_DATA=true` to enable it, which emits a warning.
-Payloads longer than `OTEL_SPAN_DATA_MAX_LENGTH` are truncated into a valid JSON
-preview; raise the limit to keep more detail, keeping Collector/Jaeger
-message-size limits in mind. The limit caps the exported attribute, not the work
-of building the SDK payload and serializing it before truncation, so
-exceptionally large payloads can still consume memory and CPU.
+Payloads longer than `OTEL_SPAN_DATA_MAX_LENGTH` are truncated into a valid JSON preview; raise the
+limit to keep more detail, keeping Collector/Jaeger message-size limits in mind.
+The exporter stops aggregating encoded JSON once it crosses the limit, but the
+SDK still materializes the span payload first, and an individual long field may
+require a temporary encoding buffer.
 
 These traces can contain prompts, personal data, or other secrets. The local
 Jaeger UI is bound to localhost, but data is still sent to the configured

@@ -452,7 +452,7 @@ class AgentExampleTests(unittest.TestCase):
             span_data=SimpleNamespace(type="generation", export=fail_export),
             started_at=_iso_timestamp(1),
             ended_at=_iso_timestamp(2),
-            error=None,
+            error={"message": "SDK operation failed", "data": None},
         )
         processor.on_trace_start(sdk_trace)
         processor.on_span_start(span)
@@ -466,6 +466,7 @@ class AgentExampleTests(unittest.TestCase):
                 if finished.name == "generation"
             )
             self.assertEqual(exported.status.status_code.name, "ERROR")
+            self.assertEqual(exported.status.description, "Agent operation failed")
             self.assertNotIn("sensitive failure detail", str(exported.attributes))
         finally:
             processor.shutdown()

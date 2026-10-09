@@ -60,9 +60,16 @@ def parse_include_sensitive_data(value: str) -> bool:
 
 
 def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
-    serialized = json.dumps(span_data, default=str, ensure_ascii=False)
-    if len(serialized) <= max_length:
-        return serialized
+    encoder = json.JSONEncoder(default=str, ensure_ascii=False)
+    chunks: list[str] = []
+    size = 0
+    for chunk in encoder.iterencode(span_data):
+        size += len(chunk)
+        if size > max_length:
+            break
+        chunks.append(chunk)
+    else:
+        return "".join(chunks)
 
     def preview_value(value: Any, string_limit: int, depth: int = 0) -> Any:
         if isinstance(value, str):
@@ -71,7 +78,8 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
             return "[nested value omitted]"
         if isinstance(value, dict):
             return {
-                key: preview_value(item, string_limit, depth + 1)
+                key[:string_limit] if isinstance(key, str) else str(key)[:string_limit]:
+                preview_value(item, string_limit, depth + 1)
                 for key, item in islice(value.items(), 8)
             }
         if isinstance(value, (list, tuple)):
@@ -80,14 +88,17 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
             return value
         return preview_value(str(value), string_limit, depth + 1)
 
-    envelope = {"truncated": True, "original_length": len(serialized), "preview": {}}
+    envelope = {"truncated": True, "preview": {}}
     for divisor in (8, 16, 32):
         envelope["preview"] = preview_value(span_data, max_length // divisor)
         truncated = json.dumps(envelope, default=str, ensure_ascii=False)
         if len(truncated) <= max_length:
             return truncated
     envelope["preview"] = {}
-    return json.dumps(envelope, ensure_ascii=False)
+    truncated = json.dumps(envelope, ensure_ascii=False)
+    if len(truncated) > max_length:
+        raise ValueError("span payload limit is too small for truncation metadata")
+    return truncated
 
 
 def _timestamp_ns(value: str | None) -> int | None:
@@ -228,7 +239,10 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                     _serialize_span_data(span_data, self._span_data_max_length),
                 )
         except Exception as error:
-            otel_span.set_status(Status(StatusCode.ERROR, "Trace payload serialization failed"))
+            if span.error is None:
+                otel_span.set_status(
+                    Status(StatusCode.ERROR, "Trace payload serialization failed")
+                )
             _logger.warning(
                 "Failed to export Agent SDK span payload (%s); omitting it",
                 type(error).__name__,
