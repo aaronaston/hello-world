@@ -20,14 +20,18 @@ from opentelemetry.trace import Status, StatusCode
 _SAMPLE_RATIO_ERROR = "OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 1.0"
 
 
+def _validate_sample_ratio(sample_ratio: float) -> float:
+    if not isfinite(sample_ratio) or not 0.0 <= sample_ratio <= 1.0:
+        raise ValueError(_SAMPLE_RATIO_ERROR)
+    return sample_ratio
+
+
 def parse_sample_ratio(value: str) -> float:
     try:
         sample_ratio = float(value)
     except ValueError as error:
         raise ValueError(_SAMPLE_RATIO_ERROR) from error
-    if not isfinite(sample_ratio) or not 0.0 <= sample_ratio <= 1.0:
-        raise ValueError(_SAMPLE_RATIO_ERROR)
-    return sample_ratio
+    return _validate_sample_ratio(sample_ratio)
 
 
 def _timestamp_ns(value: str | None) -> int | None:
@@ -63,8 +67,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         span_exporter: SpanExporter | None = None,
     ) -> None:
         """Create an OTLP exporter with the selected resource and sampling settings."""
-        if not isfinite(sample_ratio) or not 0.0 <= sample_ratio <= 1.0:
-            raise ValueError(_SAMPLE_RATIO_ERROR)
+        sample_ratio = _validate_sample_ratio(sample_ratio)
 
         provider = TracerProvider(
             resource=Resource.create({"service.name": service_name}),
