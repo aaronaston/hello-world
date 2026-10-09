@@ -97,6 +97,7 @@ class AgentExampleTests(unittest.TestCase):
 
     def test_sensitive_data_defaults_and_overrides(self) -> None:
         self.assertTrue(get_include_sensitive_data("http://localhost:4317", None))
+        self.assertTrue(get_include_sensitive_data(" http://localhost:4317 ", None))
         self.assertFalse(get_include_sensitive_data("https://collector.example:4317", None))
         self.assertTrue(get_include_sensitive_data("https://collector.example:4317", "true"))
         self.assertFalse(get_include_sensitive_data("http://localhost:4317", "false"))
@@ -406,7 +407,7 @@ class AgentExampleTests(unittest.TestCase):
         )
         self.assertEqual(
             preview["nested"]["opaque_path"]["value"],
-            "<object>",
+            "[nested value omitted]",
         )
 
     def test_preview_skips_unsupported_keys_without_stringifying_them(self) -> None:
@@ -427,6 +428,17 @@ class AgentExampleTests(unittest.TestCase):
         self.assertNotIn("<ExplodingKey>", preview)
         self.assertIn("NaN", preview)
         self.assertIn("large", preview)
+
+    def test_circular_payload_falls_back_to_bounded_preview(self) -> None:
+        cyclic: list[object] = []
+        cyclic.append(cyclic)
+
+        truncated = _serialize_span_data({"cycle": cyclic}, 128)
+        decoded = json.loads(truncated)
+
+        self.assertTrue(decoded["truncated"])
+        self.assertLessEqual(len(truncated), 128)
+        self.assertIn("nested value omitted", json.dumps(decoded))
 
     def test_model_dump_runs_once_when_payload_is_truncated(self) -> None:
         dump_count = 0
@@ -705,7 +717,10 @@ class AgentExampleTests(unittest.TestCase):
                     span_exporter=InMemorySpanExporter(),
                 )
 
-        for endpoint in ("http://localhost:4317", "https://collector.example:4317"):
+        for endpoint in (
+            "http://localhost:4317",
+            " https://collector.example:4317 ",
+        ):
             with self.subTest(endpoint=endpoint):
                 processor = OpenTelemetryTracingProcessor(
                     endpoint,

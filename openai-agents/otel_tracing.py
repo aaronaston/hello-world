@@ -110,13 +110,20 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
     )
     chunks: list[str] = []
     size = 0
-    for chunk in encoder.iterencode(span_data):
-        size += len(chunk)
-        if size > max_length:
-            break
-        chunks.append(chunk)
-    else:
-        return "".join(chunks)
+    try:
+        for chunk in encoder.iterencode(span_data):
+            size += len(chunk)
+            if size > max_length:
+                break
+            chunks.append(chunk)
+        else:
+            return "".join(chunks)
+    except (TypeError, ValueError, RecursionError) as error:
+        chunks.clear()
+        _logger.debug(
+            "Span payload encoding failed (%s); using bounded preview",
+            type(error).__name__,
+        )
 
     def preview_value(
         value: Any,
@@ -128,18 +135,21 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
             return value[:string_limit]
         if value is None or isinstance(value, (bool, int, float)):
             return value
-        dumped = dump_model(value)
+        if depth >= _SPAN_PREVIEW_DEPTH:
+            return "[nested value omitted]"
+        try:
+            dumped = dump_model(value)
+        except Exception:
+            return f"<{type(value).__name__} serialization failed>"[:string_limit]
         if dumped is not no_model_dump:
             return preview_value(
                 dumped,
                 string_limit,
                 item_limit,
-                depth,
+                depth + 1,
             )
         if not isinstance(value, (dict, list, tuple)):
             return unsupported_value(value)[:string_limit]
-        if depth >= _SPAN_PREVIEW_DEPTH:
-            return "[nested value omitted]"
         if isinstance(value, dict):
             valid_items = (
                 (key, item)
@@ -233,6 +243,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         include_span_data: bool = True,
     ) -> None:
         """Create an OTLP exporter with the selected resource and sampling settings."""
+        endpoint = endpoint.strip()
         if not endpoint.lower().startswith(("http://", "https://")):
             raise ValueError("endpoint must be an http:// or https:// URL")
         sample_ratio = _validate_sample_ratio(sample_ratio)

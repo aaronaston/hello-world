@@ -41,11 +41,11 @@ def get_otlp_endpoint() -> str:
     return os.getenv(
         "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
         os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
-    )
+    ).strip()
 
 
 def is_loopback_endpoint(endpoint: str) -> bool:
-    hostname = urlsplit(endpoint).hostname
+    hostname = urlsplit(endpoint.strip()).hostname
     try:
         return hostname is not None and ipaddress.ip_address(hostname).is_loopback
     except ValueError:
