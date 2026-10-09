@@ -81,8 +81,8 @@ python -m unittest -v test_otel_tracing
 ```
 
 They check span parent/child relationships, timestamps, sampling validation,
-error handling, incomplete-span cleanup, and that prompt/tool payloads are not
-exported as span attributes.
+error handling, incomplete-span cleanup, and that model/tool input and output
+payloads are included in exported spans.
 
 ## Configuration
 
@@ -98,15 +98,19 @@ All settings are optional:
 Use a gRPC endpoint, not the Collector’s HTTP port `4318`. An `http://` endpoint
 uses plaintext transport; `https://` uses TLS.
 
-## Privacy notes
+## Privacy and sensitive trace contents
 
 This example replaces the Agents SDK’s default trace exporter with OTLP, so
 traces go to the configured Collector rather than the OpenAI Traces dashboard.
-It disables sensitive data in the SDK run configuration and the OpenTelemetry
-processor exports span types, names, and model names—not prompts, tool
-arguments, or tool results. Agent and tool names can still reveal information,
-so keep sensitive content out of names. Tracing and data retention in other
-backends are controlled by those services.
+Sensitive-data tracing is explicitly enabled. Span details exported to Jaeger
+include model inputs and outputs and tool arguments and results, allowing you
+to inspect what the agent received and produced.
+
+These traces can contain prompts, personal data, or other secrets. The local
+Jaeger UI is bound to localhost, but data is still sent to the configured
+Collector and retained according to the Jaeger setup. Use only with data you
+are allowed to send there; redact or disable sensitive tracing before using
+real user data or a shared/production collector.
 
 ## Stop the services
 

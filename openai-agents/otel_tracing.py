@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from math import isfinite
 from threading import RLock
@@ -52,11 +53,12 @@ def _timestamp_ns(value: str | None) -> int | None:
 
 
 class OpenTelemetryTracingProcessor(TracingProcessor):
-    """Export Agents SDK spans through OTLP gRPC without prompt or tool payloads.
+    """Export detailed Agents SDK spans through OTLP gRPC, including payloads.
 
     `endpoint` must be an `http://` or `https://` gRPC URL. `sample_ratio` sets
-    parent-based head sampling between 0.0 and 1.0. HTTP URLs use plaintext;
-    HTTPS URLs use TLS.
+    parent-based head sampling between 0.0 and 1.0. The serialized SDK span
+    data can contain prompts, completions, and tool inputs/outputs. HTTP URLs
+    use plaintext; HTTPS URLs use TLS.
     """
 
     def __init__(
@@ -99,16 +101,16 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             self._traces[sdk_trace.trace_id] = self._tracer.start_span(
                 sdk_trace.name,
                 attributes={"openai_agents.trace_id": sdk_trace.trace_id},
-                start_time=_timestamp_ns(sdk_trace.started_at),
+                start_time=time_ns(),
             )
 
     def on_trace_end(self, sdk_trace: Trace) -> None:
         """End the OTel workflow span and any SDK spans that remained open."""
         with self._lock:
-            self._end_trace(sdk_trace.trace_id, _timestamp_ns(sdk_trace.ended_at))
+            self._end_trace(sdk_trace.trace_id, time_ns())
 
     def on_span_start(self, span: Span[Any]) -> None:
-        """Start an OTel span with the corresponding SDK parent and safe attributes."""
+        """Start an OTel span with the corresponding SDK parent and identifying attributes."""
         with self._lock:
             trace_span = self._traces.get(span.trace_id)
             if trace_span is None:
@@ -153,6 +155,11 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 self._spans.pop(span.trace_id, None)
             if span_entry is not None:
                 otel_span, _ = span_entry
+                span_data = span.span_data.export()
+                otel_span.set_attribute(
+                    "openai_agents.span_data",
+                    json.dumps(span_data, default=str, ensure_ascii=False),
+                )
                 if span.error is not None:
                     otel_span.set_status(Status(StatusCode.ERROR, "Agent operation failed"))
                 otel_span.end(end_time=_timestamp_ns(span.ended_at))

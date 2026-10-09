@@ -58,7 +58,7 @@ if __name__ == "__main__":
         result = Runner.run_sync(
             agent,
             "What's the weather in Paris?",
-            run_config=RunConfig(trace_include_sensitive_data=False),
+            run_config=RunConfig(trace_include_sensitive_data=True),
         )
         print(result.final_output)
     finally:

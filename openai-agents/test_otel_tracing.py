@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ from unittest.mock import patch
 
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+from agents.tracing.traces import TraceImpl
 from hello_agent import get_otlp_endpoint, load_environment
 from otel_tracing import OpenTelemetryTracingProcessor, _timestamp_ns, parse_sample_ratio
 
@@ -16,7 +18,43 @@ def _iso_timestamp(seconds: int) -> str:
     return datetime.fromtimestamp(seconds, timezone.utc).isoformat()
 
 
+def _span_data(span_type: str, name: str | None = None, **data: object) -> SimpleNamespace:
+    exported = {"type": span_type, **data}
+    if name is not None:
+        exported["name"] = name
+    return SimpleNamespace(
+        type=span_type,
+        name=name,
+        **data,
+        export=lambda: exported,
+    )
+
+
 class AgentExampleTests(unittest.TestCase):
+    def test_sdk_trace_callbacks_do_not_require_timestamp_attributes(self) -> None:
+        exporter = InMemorySpanExporter()
+        processor = OpenTelemetryTracingProcessor(
+            "http://127.0.0.1:9",
+            "test-agent",
+            span_exporter=exporter,
+        )
+        sdk_trace = TraceImpl(
+            name="SDK trace",
+            trace_id="test-trace",
+            group_id=None,
+            metadata=None,
+            processor=processor,
+        )
+        sdk_trace.start()
+        sdk_trace.finish()
+        processor.force_flush()
+        try:
+            spans = exporter.get_finished_spans()
+            self.assertEqual(len(spans), 1)
+            self.assertEqual(spans[0].name, "SDK trace")
+        finally:
+            processor.shutdown()
+
     def test_loads_values_from_dotenv_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             dotenv_path = Path(directory) / ".env"
@@ -35,7 +73,7 @@ class AgentExampleTests(unittest.TestCase):
         ):
             self.assertEqual(get_otlp_endpoint(), "https://traces:4317")
 
-    def test_exports_nested_spans_without_payload_attributes(self) -> None:
+    def test_exports_nested_spans_with_payload_attributes(self) -> None:
         exporter = InMemorySpanExporter()
         processor = OpenTelemetryTracingProcessor(
             "http://127.0.0.1:9",
@@ -45,14 +83,12 @@ class AgentExampleTests(unittest.TestCase):
         sdk_trace = SimpleNamespace(
             trace_id="trace_0123456789abcdef0123456789abcdef",
             name="test workflow",
-            started_at=_iso_timestamp(1),
-            ended_at=_iso_timestamp(4),
         )
         agent_span = SimpleNamespace(
             trace_id=sdk_trace.trace_id,
             span_id="agent",
             parent_id=None,
-            span_data=SimpleNamespace(type="agent", name="Assistant", model=None),
+            span_data=_span_data("agent", "Assistant", model=None),
             started_at=_iso_timestamp(1),
             ended_at=_iso_timestamp(4),
             error=None,
@@ -61,9 +97,9 @@ class AgentExampleTests(unittest.TestCase):
             trace_id=sdk_trace.trace_id,
             span_id="tool",
             parent_id="agent",
-            span_data=SimpleNamespace(
-                type="function",
-                name="get_weather",
+            span_data=_span_data(
+                "function",
+                "get_weather",
                 input="sensitive input",
                 output="sensitive output",
             ),
@@ -75,7 +111,12 @@ class AgentExampleTests(unittest.TestCase):
             trace_id=sdk_trace.trace_id,
             span_id="generation",
             parent_id=None,
-            span_data=SimpleNamespace(type="generation", name=None, model="test-model"),
+            span_data=_span_data(
+                "generation",
+                input=[{"role": "user", "content": "private prompt"}],
+                output=[{"role": "assistant", "content": "private response"}],
+                model="test-model",
+            ),
             started_at=_iso_timestamp(2),
             ended_at=_iso_timestamp(3),
             error=None,
@@ -104,8 +145,12 @@ class AgentExampleTests(unittest.TestCase):
             self.assertEqual(tool.status.description, "Agent operation failed")
             self.assertEqual(generation.status.status_code.name, "UNSET")
             self.assertEqual(generation.attributes["gen_ai.request.model"], "test-model")
-            self.assertNotIn("input", tool.attributes)
-            self.assertNotIn("output", tool.attributes)
+            span_data = json.loads(tool.attributes["openai_agents.span_data"])
+            self.assertEqual(span_data["input"], "sensitive input")
+            self.assertEqual(span_data["output"], "sensitive output")
+            generation_data = json.loads(generation.attributes["openai_agents.span_data"])
+            self.assertEqual(generation_data["input"][0]["content"], "private prompt")
+            self.assertEqual(generation_data["output"][0]["content"], "private response")
             self.assertNotIn("sensitive error", str(tool.attributes))
             self.assertEqual(
                 {span.name for span in spans},
@@ -129,14 +174,12 @@ class AgentExampleTests(unittest.TestCase):
         sdk_trace = SimpleNamespace(
             trace_id="trace_0123456789abcdef0123456789abcdef",
             name="unfinished workflow",
-            started_at=_iso_timestamp(1),
-            ended_at=_iso_timestamp(4),
         )
         agent_span = SimpleNamespace(
             trace_id=sdk_trace.trace_id,
             span_id="agent",
             parent_id=None,
-            span_data=SimpleNamespace(type="agent", name="Assistant"),
+            span_data=_span_data("agent", "Assistant"),
             started_at=_iso_timestamp(5),
             ended_at=None,
             error=None,
@@ -150,7 +193,7 @@ class AgentExampleTests(unittest.TestCase):
         try:
             agent = next(span for span in spans if span.name == "agent: Assistant")
             self.assertEqual(agent.status.status_code.name, "ERROR")
-            self.assertEqual(agent.end_time, agent.start_time)
+            self.assertGreaterEqual(agent.end_time, agent.start_time)
             workflow = next(span for span in spans if span.name == "unfinished workflow")
             self.assertEqual(workflow.end_time, agent.end_time)
         finally:
@@ -166,14 +209,12 @@ class AgentExampleTests(unittest.TestCase):
         sdk_trace = SimpleNamespace(
             trace_id="trace_0123456789abcdef0123456789abcdef",
             name="late end workflow",
-            started_at=_iso_timestamp(1),
-            ended_at=_iso_timestamp(3),
         )
         agent_span = SimpleNamespace(
             trace_id=sdk_trace.trace_id,
             span_id="agent",
             parent_id=None,
-            span_data=SimpleNamespace(type="agent", name="Assistant"),
+            span_data=_span_data("agent", "Assistant"),
             started_at=_iso_timestamp(1),
             ended_at=None,
             error=None,
@@ -203,14 +244,12 @@ class AgentExampleTests(unittest.TestCase):
         sdk_trace = SimpleNamespace(
             trace_id="trace_0123456789abcdef0123456789abcdef",
             name="late start workflow",
-            started_at=_iso_timestamp(1),
-            ended_at=_iso_timestamp(3),
         )
         agent_span = SimpleNamespace(
             trace_id=sdk_trace.trace_id,
             span_id="late-agent",
             parent_id=None,
-            span_data=SimpleNamespace(type="agent", name="Late"),
+            span_data=_span_data("agent", "Late"),
             started_at=_iso_timestamp(2),
             ended_at=_iso_timestamp(2),
             error=None,
@@ -236,14 +275,12 @@ class AgentExampleTests(unittest.TestCase):
         sdk_trace = SimpleNamespace(
             trace_id="trace_0123456789abcdef0123456789abcdef",
             name="shutdown workflow",
-            started_at=_iso_timestamp(1),
-            ended_at=None,
         )
         agent_span = SimpleNamespace(
             trace_id=sdk_trace.trace_id,
             span_id="agent",
             parent_id=None,
-            span_data=SimpleNamespace(type="agent", name="Assistant"),
+            span_data=_span_data("agent", "Assistant"),
             started_at=_iso_timestamp(1),
             ended_at=None,
             error=None,
@@ -268,8 +305,6 @@ class AgentExampleTests(unittest.TestCase):
         sdk_trace = SimpleNamespace(
             trace_id="trace_0123456789abcdef0123456789abcdef",
             name="duplicate workflow",
-            started_at=_iso_timestamp(1),
-            ended_at=_iso_timestamp(3),
         )
         processor.on_trace_start(sdk_trace)
         processor.on_trace_start(sdk_trace)
