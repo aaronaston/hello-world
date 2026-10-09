@@ -102,6 +102,17 @@ All settings are optional:
 Use a gRPC endpoint, not the Collector’s HTTP port `4318`. An `http://` endpoint
 uses plaintext transport; `https://` uses TLS.
 
+## Simple local trace mode
+
+For the local Collector, prompt and response capture is enabled by default. To
+make the setting explicit, run with `OTEL_TRACE_INCLUDE_SENSITIVE_DATA=true`
+and generate a new trace. Jaeger shows the captured model payload in the
+`openai_agents.span_data` attribute on the model span. Recent Agents SDK
+Responses API spans expose input and response objects separately from the
+span's standard export; this exporter includes both objects so the prompt and
+model response appear alongside the token usage. If you use a non-local OTLP
+endpoint, payload capture defaults off and must be explicitly enabled.
+
 ## Privacy and sensitive trace contents
 
 This example replaces the Agents SDK’s default trace exporter with OTLP, so

@@ -188,6 +188,66 @@ class AgentExampleTests(unittest.TestCase):
         finally:
             processor.shutdown()
 
+    def test_exports_responses_api_input_and_output_payloads(self) -> None:
+        exporter = InMemorySpanExporter()
+        processor = OpenTelemetryTracingProcessor(
+            "http://127.0.0.1:9",
+            "test-agent",
+            span_exporter=exporter,
+        )
+        sdk_trace = SimpleNamespace(trace_id="response-trace", name="response workflow")
+        input_item = SimpleNamespace(
+            model_dump=lambda **kwargs: {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "private prompt"}],
+            }
+        )
+        response = SimpleNamespace(
+            model_dump=lambda **kwargs: {
+                "id": "response_123",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "private answer"}],
+                    }
+                ],
+            }
+        )
+        response_span = SimpleNamespace(
+            trace_id=sdk_trace.trace_id,
+            span_id="response",
+            parent_id=None,
+            span_data=SimpleNamespace(
+                type="response",
+                input=[input_item],
+                response=response,
+                export=lambda: {
+                    "type": "response",
+                    "response_id": "response_123",
+                    "usage": {"input_tokens": 12, "output_tokens": 8},
+                },
+            ),
+            started_at=_iso_timestamp(1),
+            ended_at=_iso_timestamp(2),
+            error=None,
+        )
+        processor.on_trace_start(sdk_trace)
+        processor.on_span_start(response_span)
+        processor.on_span_end(response_span)
+        processor.on_trace_end(sdk_trace)
+        processor.force_flush()
+
+        try:
+            exported = next(
+                span for span in exporter.get_finished_spans() if span.name == "response"
+            )
+            payload = json.loads(exported.attributes["openai_agents.span_data"])
+            self.assertEqual(payload["input"][0]["content"][0]["text"], "private prompt")
+            self.assertEqual(payload["output"]["output"][0]["content"][0]["text"], "private answer")
+            self.assertEqual(payload["usage"]["input_tokens"], 12)
+        finally:
+            processor.shutdown()
+
     def test_truncates_large_payload_to_configured_limit(self) -> None:
         exporter = InMemorySpanExporter()
         processor = OpenTelemetryTracingProcessor(
@@ -445,7 +505,12 @@ class AgentExampleTests(unittest.TestCase):
             trace_id=sdk_trace.trace_id,
             span_id="redacted-generation",
             parent_id=None,
-            span_data=_span_data("generation", input="private prompt", output="private answer"),
+            span_data=SimpleNamespace(
+                type="response",
+                input=[{"role": "user", "content": "private prompt"}],
+                response={"output": "private answer"},
+                export=lambda: {"type": "response", "response_id": "redacted"},
+            ),
             started_at=_iso_timestamp(1),
             ended_at=_iso_timestamp(2),
             error=None,
