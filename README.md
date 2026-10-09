@@ -46,6 +46,8 @@ docker compose up -d
 The Collector listens for OTLP on localhost ports `4317` (gRPC) and `4318`
 (HTTP). This example uses gRPC on port `4317`. Jaeger’s UI is at
 <http://localhost:16686>. The published ports are bound to localhost only.
+The Jaeger UI theme selector is enabled; use the theme control in the top
+navigation to switch to dark mode. Jaeger remembers the choice in your browser.
 
 ## 3. Configure and run the agent
 
