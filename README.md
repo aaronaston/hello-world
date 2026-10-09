@@ -132,7 +132,9 @@ Payloads longer than `OTEL_SPAN_DATA_MAX_LENGTH` are truncated into a valid JSON
 limit to keep more detail, keeping Collector/Jaeger message-size limits in mind.
 The exporter stops aggregating encoded JSON once it crosses the limit, but the
 SDK still materializes the span payload first, and an individual long field may
-require a temporary encoding buffer.
+require a temporary encoding buffer. SDK response objects are converted with
+`model_dump()` during serialization, so a single large object may also require
+temporary memory before the output limit is applied.
 
 These traces can contain prompts, personal data, or other secrets. The local
 Jaeger UI is bound to localhost, but data is still sent to the configured

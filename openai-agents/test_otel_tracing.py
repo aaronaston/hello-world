@@ -19,6 +19,7 @@ from hello_agent import (
 )
 from otel_tracing import (
     OpenTelemetryTracingProcessor,
+    _export_span_data,
     _serialize_span_data,
     _timestamp_ns,
     parse_include_sensitive_data,
@@ -245,6 +246,68 @@ class AgentExampleTests(unittest.TestCase):
             self.assertEqual(payload["input"][0]["content"][0]["text"], "private prompt")
             self.assertEqual(payload["output"]["output"][0]["content"][0]["text"], "private answer")
             self.assertEqual(payload["usage"]["input_tokens"], 12)
+        finally:
+            processor.shutdown()
+
+    def test_response_span_without_payload_retains_metadata(self) -> None:
+        span_data = SimpleNamespace(
+            type="response",
+            input=None,
+            response=None,
+            export=lambda: {
+                "type": "response",
+                "response_id": "response_123",
+                "usage": {"input_tokens": 12},
+            },
+        )
+
+        self.assertEqual(
+            _export_span_data(span_data),
+            {
+                "type": "response",
+                "response_id": "response_123",
+                "usage": {"input_tokens": 12},
+            },
+        )
+
+    def test_response_model_dump_failure_does_not_escape_callback(self) -> None:
+        def fail_model_dump(**kwargs: object) -> dict[str, object]:
+            raise RuntimeError("sensitive model serialization details")
+
+        exporter = InMemorySpanExporter()
+        processor = OpenTelemetryTracingProcessor(
+            "http://127.0.0.1:9",
+            "test-agent",
+            span_exporter=exporter,
+        )
+        sdk_trace = SimpleNamespace(trace_id="response-error", name="response error workflow")
+        response_span = SimpleNamespace(
+            trace_id=sdk_trace.trace_id,
+            span_id="response-error-span",
+            parent_id=None,
+            span_data=SimpleNamespace(
+                type="response",
+                input=None,
+                response=SimpleNamespace(model_dump=fail_model_dump),
+                export=lambda: {"type": "response", "response_id": "response_123"},
+            ),
+            started_at=_iso_timestamp(1),
+            ended_at=_iso_timestamp(2),
+            error=None,
+        )
+        processor.on_trace_start(sdk_trace)
+        processor.on_span_start(response_span)
+        processor.on_span_end(response_span)
+        processor.on_trace_end(sdk_trace)
+        processor.force_flush()
+
+        try:
+            exported = next(
+                span for span in exporter.get_finished_spans() if span.name == "response"
+            )
+            self.assertEqual(exported.status.status_code.name, "ERROR")
+            self.assertNotIn("openai_agents.span_data", exported.attributes)
+            self.assertNotIn("sensitive model serialization details", str(exported.attributes))
         finally:
             processor.shutdown()
 

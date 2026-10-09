@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
 from datetime import datetime, timezone
 from itertools import islice
 from math import isfinite
@@ -73,7 +72,10 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
     if max_length < _MIN_SPAN_DATA_LENGTH:
         raise ValueError(_SPAN_DATA_LENGTH_ERROR)
 
-    def unsupported_value(value: Any) -> str:
+    def unsupported_value(value: Any) -> Any:
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            return model_dump(mode="json", exclude_none=True)
         return f"<{type(value).__name__}>"
 
     encoder = json.JSONEncoder(default=unsupported_value, ensure_ascii=False)
@@ -97,6 +99,14 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
             return value[:string_limit]
         if value is None or isinstance(value, (bool, int, float)):
             return value
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            return preview_value(
+                model_dump(mode="json", exclude_none=True),
+                string_limit,
+                item_limit,
+                depth,
+            )
         if not isinstance(value, (dict, list, tuple)):
             return unsupported_value(value)[:string_limit]
         if depth >= _SPAN_PREVIEW_DEPTH:
@@ -127,18 +137,6 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
     return json.dumps(envelope, ensure_ascii=False)
 
 
-def _json_compatible(value: Any) -> Any:
-    """Convert SDK/Pydantic values in model payloads to JSON-compatible structures."""
-    model_dump = getattr(value, "model_dump", None)
-    if callable(model_dump):
-        return _json_compatible(model_dump(mode="json", exclude_none=True))
-    if isinstance(value, Mapping):
-        return {str(key): _json_compatible(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_compatible(item) for item in value]
-    return value
-
-
 def _export_span_data(span_data: Any) -> dict[str, Any]:
     """Export SDK span data, including payloads omitted by ResponseSpanData.export()."""
     exported = span_data.export()
@@ -146,9 +144,9 @@ def _export_span_data(span_data: Any) -> dict[str, Any]:
         input_data = getattr(span_data, "input", None)
         response = getattr(span_data, "response", None)
         if input_data is not None:
-            exported["input"] = _json_compatible(input_data)
+            exported["input"] = input_data
         if response is not None:
-            exported["output"] = _json_compatible(response)
+            exported["output"] = response
     return exported
 
 
