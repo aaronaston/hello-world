@@ -72,7 +72,7 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
     if max_length < _MIN_SPAN_DATA_LENGTH:
         raise ValueError(_SPAN_DATA_LENGTH_ERROR)
 
-    model_dump_cache: dict[int, tuple[Any, Any]] = {}
+    model_dump_cache: dict[int, tuple[Any, Any, Exception | None]] = {}
     no_model_dump = object()
 
     def dump_model(value: Any) -> Any:
@@ -81,11 +81,16 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
             return no_model_dump
         object_id = id(value)
         if object_id not in model_dump_cache:
-            model_dump_cache[object_id] = (
-                value,
-                model_dump(mode="json", exclude_none=True),
-            )
-        return model_dump_cache[object_id][1]
+            try:
+                dumped = model_dump(mode="json", exclude_none=True)
+            except Exception as error:
+                model_dump_cache[object_id] = (value, no_model_dump, error)
+            else:
+                model_dump_cache[object_id] = (value, dumped, None)
+        _, dumped, error = model_dump_cache[object_id]
+        if error is not None:
+            raise error
+        return dumped
 
     def unsupported_value(value: Any) -> Any:
         dumped = dump_model(value)
@@ -168,7 +173,7 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
 
 def _export_span_data(span_data: Any) -> dict[str, Any]:
     """Export SDK span data, including payloads omitted by ResponseSpanData.export()."""
-    exported = span_data.export()
+    exported = dict(span_data.export())
     if span_data.type == "response":
         input_data = getattr(span_data, "input", None)
         response = getattr(span_data, "response", None)

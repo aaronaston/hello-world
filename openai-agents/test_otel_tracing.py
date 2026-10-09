@@ -272,8 +272,27 @@ class AgentExampleTests(unittest.TestCase):
             },
         )
 
+    def test_response_span_enrichment_does_not_mutate_exported_dict(self) -> None:
+        base_export = {"type": "response", "response_id": "response_123"}
+        span_data = SimpleNamespace(
+            type="response",
+            input=[{"role": "user", "content": "prompt"}],
+            response={"output": "answer"},
+            export=lambda: base_export,
+        )
+
+        enriched = _export_span_data(span_data)
+
+        self.assertEqual(base_export, {"type": "response", "response_id": "response_123"})
+        self.assertIn("input", enriched)
+        self.assertIn("output", enriched)
+
     def test_response_model_dump_failure_does_not_escape_callback(self) -> None:
+        dump_calls = 0
+
         def fail_model_dump(**kwargs: object) -> dict[str, object]:
+            nonlocal dump_calls
+            dump_calls += 1
             raise RuntimeError("sensitive model serialization details")
 
         exporter = InMemorySpanExporter()
@@ -310,6 +329,7 @@ class AgentExampleTests(unittest.TestCase):
             self.assertEqual(exported.status.status_code.name, "ERROR")
             self.assertNotIn("openai_agents.span_data", exported.attributes)
             self.assertNotIn("sensitive model serialization details", str(exported.attributes))
+            self.assertEqual(dump_calls, 1)
         finally:
             processor.shutdown()
 
