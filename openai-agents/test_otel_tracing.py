@@ -19,6 +19,7 @@ from hello_agent import (
 )
 from otel_tracing import (
     OpenTelemetryTracingProcessor,
+    _serialize_span_data,
     _timestamp_ns,
     parse_include_sensitive_data,
     parse_sample_ratio,
@@ -225,6 +226,30 @@ class AgentExampleTests(unittest.TestCase):
             self.assertLessEqual(len(json.dumps(decoded)), 128)
         finally:
             processor.shutdown()
+
+    def test_truncation_preview_bounds_structure_and_non_string_keys(self) -> None:
+        payload = {
+            "k" * 100: "v" * 500,
+            1: "numeric key",
+            "items": list(range(12)),
+            "nested": {"level1": {"level2": {"level3": "omitted"}}},
+            **{f"extra-{index}": "x" * 500 for index in range(8)},
+        }
+
+        truncated = _serialize_span_data(payload, 512)
+        decoded = json.loads(truncated)
+        preview = decoded["preview"]
+
+        self.assertTrue(decoded["truncated"])
+        self.assertLessEqual(len(truncated), 512)
+        self.assertLessEqual(len(preview), 8)
+        self.assertIn("1", preview)
+        self.assertLessEqual(len(next(key for key in preview if key.startswith("k"))), 32)
+        self.assertEqual(len(preview["items"]), 8)
+        self.assertEqual(
+            preview["nested"]["level1"]["level2"],
+            "[nested value omitted]",
+        )
 
     def test_trace_end_closes_unfinished_spans(self) -> None:
         exporter = InMemorySpanExporter()

@@ -23,6 +23,7 @@ from opentelemetry.trace import Status, StatusCode
 _SAMPLE_RATIO_ERROR = "OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 1.0"
 _SPAN_DATA_LENGTH_ERROR = "OTEL_SPAN_DATA_MAX_LENGTH must be an integer of at least 128"
 _SENSITIVE_DATA_ERROR = "OTEL_TRACE_INCLUDE_SENSITIVE_DATA must be true or false"
+_MIN_SPAN_DATA_LENGTH = 128
 _logger = logging.getLogger(__name__)
 
 
@@ -45,7 +46,7 @@ def parse_span_data_max_length(value: str) -> int:
         max_length = int(value)
     except ValueError as error:
         raise ValueError(_SPAN_DATA_LENGTH_ERROR) from error
-    if max_length < 128:
+    if max_length < _MIN_SPAN_DATA_LENGTH:
         raise ValueError(_SPAN_DATA_LENGTH_ERROR)
     return max_length
 
@@ -60,7 +61,10 @@ def parse_include_sensitive_data(value: str) -> bool:
 
 
 def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
-    encoder = json.JSONEncoder(default=str, ensure_ascii=False)
+    def unsupported_value(value: Any) -> str:
+        return f"<{type(value).__name__}>"
+
+    encoder = json.JSONEncoder(default=unsupported_value, ensure_ascii=False)
     chunks: list[str] = []
     size = 0
     for chunk in encoder.iterencode(span_data):
@@ -86,19 +90,16 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
             return [preview_value(item, string_limit, depth + 1) for item in value[:8]]
         if value is None or isinstance(value, (bool, int, float)):
             return value
-        return preview_value(str(value), string_limit, depth + 1)
+        return preview_value(unsupported_value(value), string_limit, depth + 1)
 
     envelope = {"truncated": True, "preview": {}}
     for divisor in (8, 16, 32):
         envelope["preview"] = preview_value(span_data, max_length // divisor)
-        truncated = json.dumps(envelope, default=str, ensure_ascii=False)
+        truncated = json.dumps(envelope, default=unsupported_value, ensure_ascii=False)
         if len(truncated) <= max_length:
             return truncated
     envelope["preview"] = {}
-    truncated = json.dumps(envelope, ensure_ascii=False)
-    if len(truncated) > max_length:
-        raise ValueError("span payload limit is too small for truncation metadata")
-    return truncated
+    return json.dumps(envelope, ensure_ascii=False)
 
 
 def _timestamp_ns(value: str | None) -> int | None:
@@ -140,7 +141,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         if not endpoint.lower().startswith(("http://", "https://")):
             raise ValueError("endpoint must be an http:// or https:// URL")
         sample_ratio = _validate_sample_ratio(sample_ratio)
-        if span_data_max_length < 128:
+        if span_data_max_length < _MIN_SPAN_DATA_LENGTH:
             raise ValueError(_SPAN_DATA_LENGTH_ERROR)
 
         exporter = span_exporter or OTLPSpanExporter(
