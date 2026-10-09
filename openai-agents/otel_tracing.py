@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from math import isfinite
 from threading import RLock
@@ -21,6 +22,7 @@ from opentelemetry.trace import Status, StatusCode
 _SAMPLE_RATIO_ERROR = "OTEL_TRACE_SAMPLE_RATIO must be a number between 0.0 and 1.0"
 _SPAN_DATA_LENGTH_ERROR = "OTEL_SPAN_DATA_MAX_LENGTH must be an integer of at least 128"
 _SENSITIVE_DATA_ERROR = "OTEL_TRACE_INCLUDE_SENSITIVE_DATA must be true or false"
+_logger = logging.getLogger(__name__)
 
 
 def _validate_sample_ratio(sample_ratio: float) -> float:
@@ -61,16 +63,8 @@ def _serialize_span_data(span_data: dict[str, Any], max_length: int) -> str:
     if len(serialized) <= max_length:
         return serialized
 
-    envelope = {
-        "truncated": True,
-        "original_length": len(serialized),
-        "preview": "",
-    }
-    envelope_length = len(json.dumps(envelope, ensure_ascii=False))
-    # JSON escaping expands any character by at most six characters.
-    preview_length = max(0, (max_length - envelope_length) // 6)
-    envelope["preview"] = serialized[:preview_length]
-    return json.dumps(envelope, ensure_ascii=False)
+    suffix = f"...[truncated; {len(serialized)} serialized characters total]"
+    return serialized[: max_length - len(suffix)] + suffix
 
 
 def _timestamp_ns(value: str | None) -> int | None:
@@ -202,14 +196,17 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
         otel_span, _ = span_entry
         try:
+            if span.error is not None:
+                otel_span.set_status(Status(StatusCode.ERROR, "Agent operation failed"))
             if self._include_span_data:
                 span_data = span.span_data.export()
                 otel_span.set_attribute(
                     "openai_agents.span_data",
                     _serialize_span_data(span_data, self._span_data_max_length),
                 )
-            if span.error is not None:
-                otel_span.set_status(Status(StatusCode.ERROR, "Agent operation failed"))
+        except Exception:
+            otel_span.set_status(Status(StatusCode.ERROR, "Trace payload serialization failed"))
+            _logger.warning("Failed to export Agent SDK span payload; omitting it")
         finally:
             otel_span.end(end_time=_timestamp_ns(span.ended_at))
 

@@ -6,11 +6,12 @@ from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest.mock import patch
+import warnings
 
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from agents.tracing.traces import TraceImpl
-from hello_agent import get_otlp_endpoint, load_environment
+from hello_agent import get_otlp_endpoint, load_environment, warn_if_remote_sensitive_endpoint
 from otel_tracing import (
     OpenTelemetryTracingProcessor,
     _timestamp_ns,
@@ -78,6 +79,14 @@ class AgentExampleTests(unittest.TestCase):
             },
         ):
             self.assertEqual(get_otlp_endpoint(), "https://traces:4317")
+
+    def test_warns_for_remote_sensitive_trace_endpoint(self) -> None:
+        with self.assertWarnsRegex(UserWarning, "non-loopback OTLP endpoint"):
+            warn_if_remote_sensitive_endpoint("https://collector.example:4317", True)
+        with warnings.catch_warnings(record=True) as caught:
+            warn_if_remote_sensitive_endpoint("http://127.0.0.1:4317", True)
+            warn_if_remote_sensitive_endpoint("https://collector.example:4317", False)
+            self.assertEqual(caught, [])
 
     def test_exports_nested_spans_with_payload_attributes(self) -> None:
         exporter = InMemorySpanExporter()
@@ -203,7 +212,8 @@ class AgentExampleTests(unittest.TestCase):
             )
             payload = exported.attributes["openai_agents.span_data"]
             self.assertLessEqual(len(payload), 128)
-            self.assertTrue(json.loads(payload)["truncated"])
+            self.assertTrue(payload.startswith("{"))
+            self.assertIn("[truncated;", payload)
         finally:
             processor.shutdown()
 
@@ -412,6 +422,42 @@ class AgentExampleTests(unittest.TestCase):
                 if finished.name == "generation"
             )
             self.assertNotIn("openai_agents.span_data", exported.attributes)
+        finally:
+            processor.shutdown()
+
+    def test_payload_export_failure_does_not_escape_callback(self) -> None:
+        def fail_export() -> dict[str, str]:
+            raise RuntimeError("sensitive failure detail")
+
+        exporter = InMemorySpanExporter()
+        processor = OpenTelemetryTracingProcessor(
+            "http://127.0.0.1:9",
+            "test-agent",
+            span_exporter=exporter,
+        )
+        sdk_trace = SimpleNamespace(trace_id="failed-export", name="failure workflow")
+        span = SimpleNamespace(
+            trace_id=sdk_trace.trace_id,
+            span_id="bad-payload",
+            parent_id=None,
+            span_data=SimpleNamespace(type="generation", export=fail_export),
+            started_at=_iso_timestamp(1),
+            ended_at=_iso_timestamp(2),
+            error=None,
+        )
+        processor.on_trace_start(sdk_trace)
+        processor.on_span_start(span)
+        processor.on_span_end(span)
+        processor.on_trace_end(sdk_trace)
+        processor.force_flush()
+        try:
+            exported = next(
+                finished
+                for finished in exporter.get_finished_spans()
+                if finished.name == "generation"
+            )
+            self.assertEqual(exported.status.status_code.name, "ERROR")
+            self.assertNotIn("sensitive failure detail", str(exported.attributes))
         finally:
             processor.shutdown()
 

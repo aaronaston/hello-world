@@ -5,7 +5,10 @@ Docs: https://openai.github.io/openai-agents-python/
 """
 from __future__ import annotations
 
+import ipaddress
 import os
+from urllib.parse import urlsplit
+import warnings
 
 from dotenv import load_dotenv
 
@@ -41,6 +44,23 @@ def get_otlp_endpoint() -> str:
     )
 
 
+def warn_if_remote_sensitive_endpoint(endpoint: str, include_sensitive_data: bool) -> None:
+    if not include_sensitive_data:
+        return
+    hostname = urlsplit(endpoint).hostname
+    try:
+        is_loopback = hostname is not None and ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        is_loopback = hostname == "localhost"
+    if not is_loopback:
+        warnings.warn(
+            "Sensitive agent trace payloads are enabled and will be sent to a non-loopback "
+            "OTLP endpoint.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+
 @function_tool
 def get_weather(city: str) -> str:
     """Return a (fake) weather report for a city."""
@@ -63,6 +83,7 @@ if __name__ == "__main__":
     include_sensitive_data = parse_include_sensitive_data(
         os.getenv("OTEL_TRACE_INCLUDE_SENSITIVE_DATA", "true")
     )
+    warn_if_remote_sensitive_endpoint(endpoint, include_sensitive_data)
     processor = OpenTelemetryTracingProcessor(
         endpoint,
         service_name,
