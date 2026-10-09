@@ -235,6 +235,29 @@ class OpenTelemetryTracingProcessorTests(unittest.TestCase):
         self.assertEqual(agent.status.status_code.name, "ERROR")
         self.assertEqual(agent.end_time, workflow.end_time)
 
+    def test_duplicate_trace_start_closes_previous_trace(self) -> None:
+        exporter = InMemorySpanExporter()
+        processor = OpenTelemetryTracingProcessor(
+            "http://127.0.0.1:9",
+            "test-agent",
+            span_exporter=exporter,
+        )
+        sdk_trace = SimpleNamespace(
+            trace_id="trace_0123456789abcdef0123456789abcdef",
+            name="duplicate workflow",
+            started_at=_iso_timestamp(1),
+            ended_at=_iso_timestamp(3),
+        )
+        processor.on_trace_start(sdk_trace)
+        processor.on_trace_start(sdk_trace)
+        processor.on_trace_end(sdk_trace)
+        processor.force_flush(timeout_millis=1000)
+
+        spans = exporter.get_finished_spans()
+        self.assertEqual(len(spans), 2)
+        self.assertEqual([span.name for span in spans], ["duplicate workflow"] * 2)
+        processor.shutdown()
+
     def test_rejects_invalid_sampling_ratio(self) -> None:
         for ratio in (-0.1, 1.1, float("nan")):
             with self.subTest(ratio=ratio), self.assertRaisesRegex(

@@ -93,6 +93,8 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     def on_trace_start(self, sdk_trace: Trace) -> None:
         """Start the OTel workflow span."""
         with self._lock:
+            if sdk_trace.trace_id in self._traces:
+                self._end_trace(sdk_trace.trace_id)
             self._traces[sdk_trace.trace_id] = self._tracer.start_span(
                 sdk_trace.name,
                 attributes={"openai_agents.trace_id": sdk_trace.trace_id},
@@ -154,9 +156,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                     otel_span.set_status(Status(StatusCode.ERROR, "Agent operation failed"))
                 otel_span.end(end_time=_timestamp_ns(span.ended_at))
 
-    def force_flush(self) -> None:
+    def force_flush(self, timeout_millis: int = 30_000) -> None:
         """Flush spans buffered by the OTel provider."""
-        self._provider.force_flush()
+        self._provider.force_flush(timeout_millis=timeout_millis)
 
     def shutdown(self) -> None:
         """Close incomplete spans and shut down the OTel provider."""
